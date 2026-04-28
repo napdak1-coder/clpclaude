@@ -1,0 +1,503 @@
+"use client";
+
+/**
+ * 엑셀/CSV 양식 가져오기
+ *
+ * 1) 파일 업로드 → 헤더 자동 감지 + 헤더 위쪽 메타 정보(P.O.D / M.BOOKING NO / CLP 번호 / 선박 / ETD / SIZE) 추출
+ * 2) 컬럼 매핑(부킹 + 화물 그룹화) — 사용자 보정 가능
+ * 3) 확정 시:
+ *    - 메타 + 매핑된 부킹 컬럼 → bookingPatch (사용자 입력은 보존)
+ *    - 화물 행: 매핑된 컬럼 → CargoRow
+ *    - itemRemark / generalRemark 텍스트에서 "112X145X165(2)" 같은 사이즈 패턴 자동 추출 →
+ *      width/length/height/quantity 자동 채움. 여러 사이즈("+" 구분) 는 행을 분할.
+ */
+
+import { useRef, useState } from "react";
+import {
+  BOOKING_FIELDS,
+  CARGO_FIELDS,
+  FIELD_LABELS,
+  displayHeader,
+  mapHeadersToFields,
+  parseDimensionsFromText,
+  parseExcelFile,
+  type BookingFieldKey,
+  type CargoFieldKey,
+  type DimensionMatch,
+  type ExcelMeta,
+  type FieldKey,
+  type ParsedExcel,
+} from "@/lib/excel";
+import { makeEmptyRow, type CargoRow } from "./CargoTable";
+
+export interface ExcelImportPayload {
+  /** 부킹 입력칸 자동 채움 — 비어 있는 칸만 채워서 사용자 수기 입력 보존 */
+  bookingPatch: Partial<Record<BookingFieldKey, string>>;
+  /** 추가/교체할 화물 행들 */
+  rows: CargoRow[];
+}
+
+interface ExcelImportProps {
+  onImport: (payload: ExcelImportPayload) => void;
+}
+
+function toBoolish(v: unknown): boolean {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    return s === "y" || s === "yes" || s === "true" || s === "o" || s === "1";
+  }
+  return false;
+}
+
+function toNumberish(v: unknown): number {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (typeof v === "string") {
+    const n = Number(v.replace(/,/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+function isEmptyCell(v: unknown): boolean {
+  if (v == null) return true;
+  if (typeof v === "string") return v.trim().length === 0;
+  return false;
+}
+
+function recalcCbm(out: CargoRow): number {
+  return Number(
+    (
+      (out.widthCm * out.lengthCm * out.heightCm * out.quantity) /
+      1_000_000
+    ).toFixed(4),
+  );
+}
+
+const CARGO_FIELD_SET = new Set<FieldKey>(CARGO_FIELDS);
+const BOOKING_FIELD_SET = new Set<FieldKey>(BOOKING_FIELDS);
+
+/**
+ * 메타 정보를 부킹 패치에 반영.
+ * 매핑된 컬럼 값(per-row)이 우선이지만, 컬럼이 비어 있을 때 메타로 보강한다.
+ */
+function bookingPatchFromMeta(meta: ExcelMeta): Partial<Record<BookingFieldKey, string>> {
+  const patch: Partial<Record<BookingFieldKey, string>> = {};
+  if (meta.destination) patch.destination = meta.destination;
+  if (meta.bookingNo) patch.bookingNo = meta.bookingNo;
+  // CLP 번호 / SIZE / VESSEL / ETD 는 about 칸에 한 줄로 모아 보존
+  const aboutBits: string[] = [];
+  if (meta.clpNumber) aboutBits.push(`CLP:${meta.clpNumber}`);
+  if (meta.containerType) aboutBits.push(`SIZE:${meta.containerType}`);
+  if (meta.vessel) aboutBits.push(`VESSEL:${meta.vessel}`);
+  if (meta.etd) aboutBits.push(`ETD:${meta.etd}`);
+  if (meta.eta) aboutBits.push(`ETA:${meta.eta}`);
+  if (aboutBits.length > 0) patch.about = aboutBits.join(" / ");
+  return patch;
+}
+
+/** 사이즈 매치 1건을 적용해 새 행을 만든다 */
+function applyDimension(base: CargoRow, dim: DimensionMatch): CargoRow {
+  const next: CargoRow = {
+    ...base,
+    rowKey: crypto.randomUUID(),
+    widthCm: dim.width,
+    lengthCm: dim.length,
+    heightCm: dim.height,
+  };
+  if (dim.count && dim.count > 0) {
+    next.quantity = dim.count;
+  }
+  if (next.cbmAuto) {
+    next.cbm = recalcCbm(next);
+  }
+  return next;
+}
+
+export function ExcelImport({ onImport }: ExcelImportProps) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [parsed, setParsed] = useState<ParsedExcel | null>(null);
+  const [mapping, setMapping] = useState<Record<string, FieldKey | null>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [extractDimensions, setExtractDimensions] = useState(true);
+  const [applyMeta, setApplyMeta] = useState(true);
+
+  const onPickFile = async (file: File) => {
+    setError(null);
+    setBusy(true);
+    try {
+      const result = await parseExcelFile(file);
+      setParsed(result);
+      setMapping(mapHeadersToFields(result.headers));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "파일 파싱 실패";
+      setError(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmImport = () => {
+    if (!parsed) return;
+
+    /** 1) 부킹 패치 — 메타 + 매핑된 컬럼 첫 번째 비어있지 않은 값 */
+    const bookingPatch: Partial<Record<BookingFieldKey, string>> = applyMeta
+      ? bookingPatchFromMeta(parsed.meta)
+      : {};
+
+    const bookingHeaderMap = new Map<BookingFieldKey, string>();
+    for (const [header, field] of Object.entries(mapping)) {
+      if (!field) continue;
+      if (BOOKING_FIELD_SET.has(field)) {
+        bookingHeaderMap.set(field as BookingFieldKey, header);
+      }
+    }
+    for (const [field, header] of bookingHeaderMap.entries()) {
+      for (const row of parsed.rows) {
+        const v = row[header];
+        if (!isEmptyCell(v)) {
+          bookingPatch[field] = String(v).trim();
+          break;
+        }
+      }
+    }
+
+    /** 2) 화물 행 — 매핑된 컬럼 + REMARK 사이즈 자동 추출 */
+    const cargoRows: CargoRow[] = [];
+    for (const row of parsed.rows) {
+      const base = makeEmptyRow();
+      let remarkText = "";
+
+      for (const [header, field] of Object.entries(mapping)) {
+        if (!field) continue;
+        if (!CARGO_FIELD_SET.has(field)) continue;
+        const value = row[header];
+        switch (field as CargoFieldKey) {
+          case "itemName":
+            base.itemName = String(value ?? "");
+            break;
+          case "itemActualShipperName":
+            base.actualShipperName = String(value ?? "").trim();
+            break;
+          case "itemShipperName":
+            base.shipperName = String(value ?? "").trim();
+            break;
+          case "widthCm":
+            base.widthCm = toNumberish(value);
+            break;
+          case "lengthCm":
+            base.lengthCm = toNumberish(value);
+            break;
+          case "heightCm":
+            base.heightCm = toNumberish(value);
+            break;
+          case "quantity":
+            base.quantity = Math.max(1, Math.round(toNumberish(value)));
+            break;
+          case "weightPerUnitKg":
+            base.weightPerUnitKg = toNumberish(value);
+            break;
+          case "cbm": {
+            const n = toNumberish(value);
+            if (n > 0) {
+              base.cbm = n;
+              base.cbmAuto = false;
+            }
+            break;
+          }
+          case "noStacking":
+            base.noStacking = toBoolish(value);
+            break;
+          case "topOnly":
+            base.topOnly = toBoolish(value);
+            break;
+          case "orientation": {
+            const s = String(value ?? "").toLowerCase();
+            if (s.includes("fixed") || s.includes("회전")) base.orientation = "fixed";
+            else if (s.includes("long") || s.includes("장축")) base.orientation = "long_along_length";
+            else base.orientation = "free";
+            break;
+          }
+          case "heavierBelow":
+            base.heavierBelow = toBoolish(value);
+            break;
+          case "itemRemark": {
+            const txt = String(value ?? "");
+            base.itemRemark = txt;
+            if (txt) remarkText += (remarkText ? " " : "") + txt;
+            break;
+          }
+        }
+      }
+
+      // 부킹용 generalRemark 컬럼에도 사이즈 텍스트가 있을 수 있어 같이 스캔
+      // (사용자 양식의 "REMARK" 가 itemRemark 로 매핑돼도 안전망 차원에서 둘 다 본다)
+      if (extractDimensions && !remarkText) {
+        const generalHeader = Object.entries(mapping).find(
+          ([, f]) => f === "generalRemark",
+        )?.[0];
+        if (generalHeader) {
+          const v = row[generalHeader];
+          if (typeof v === "string" && v.trim()) remarkText = v.trim();
+        }
+      }
+
+      const dimsMissing =
+        base.widthCm === 0 || base.lengthCm === 0 || base.heightCm === 0;
+      let dims: DimensionMatch[] = [];
+      if (extractDimensions && remarkText) {
+        dims = parseDimensionsFromText(remarkText);
+      }
+
+      if (dims.length === 0) {
+        if (base.cbmAuto) base.cbm = recalcCbm(base);
+        // 사이즈가 전혀 없는 행은 화물로 못 쓰니 스킵
+        if (
+          base.widthCm > 0 &&
+          base.lengthCm > 0 &&
+          base.heightCm > 0 &&
+          base.quantity > 0
+        ) {
+          cargoRows.push(base);
+        }
+      } else if (dims.length === 1) {
+        // 단일 사이즈: 매핑된 가로/세로/높이가 비어 있으면 보충
+        const target = dimsMissing ? applyDimension(base, dims[0]) : base;
+        if (
+          target.widthCm > 0 &&
+          target.lengthCm > 0 &&
+          target.heightCm > 0 &&
+          target.quantity > 0
+        ) {
+          if (target.cbmAuto) target.cbm = recalcCbm(target);
+          cargoRows.push(target);
+        }
+      } else {
+        // 다중 사이즈 — 각 사이즈별로 행을 만든다 (count 가 있으면 각 수량으로)
+        for (const d of dims) {
+          const r = applyDimension(base, d);
+          if (
+            r.widthCm > 0 &&
+            r.lengthCm > 0 &&
+            r.heightCm > 0 &&
+            r.quantity > 0
+          ) {
+            cargoRows.push(r);
+          }
+        }
+      }
+    }
+
+    onImport({ bookingPatch, rows: cargoRows });
+    setParsed(null);
+    setMapping({});
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  return (
+    <div className="rounded-lg border border-dashed border-neutral-300 bg-neutral-50 p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="cursor-pointer rounded bg-neutral-700 px-3 py-1 text-white hover:bg-neutral-800">
+          엑셀/CSV 가져오기
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void onPickFile(f);
+            }}
+          />
+        </label>
+        <span className="text-xs text-neutral-500">
+          헤더가 1행이 아니어도 자동 감지 (House B/L / Booking No 인식). 상단 메타(P.O.D, M.BOOKING NO 등)도 자동 추출.
+        </span>
+        {busy && <span className="text-xs text-neutral-500">파싱 중…</span>}
+      </div>
+
+      {error && (
+        <div className="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+          {error}
+        </div>
+      )}
+
+      {parsed && parsed.headers.length > 0 && (
+        <div className="mt-3 space-y-3">
+          {/* 감지된 메타 정보 */}
+          {hasMeta(parsed.meta) && (
+            <div className="rounded border border-amber-200 bg-amber-50 px-2 py-2 text-xs">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="font-semibold text-amber-800">
+                  상단 메타 자동 인식 (헤더 {parsed.headerRowIndex + 1}행 위)
+                </span>
+                <label className="flex items-center gap-1 text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={applyMeta}
+                    onChange={(e) => setApplyMeta(e.target.checked)}
+                  />
+                  부킹에 자동 채우기
+                </label>
+              </div>
+              <ul className="space-y-0.5 text-amber-900">
+                {parsed.meta.destination && (
+                  <li>
+                    <b>P.O.D → 목적지</b>: {parsed.meta.destination}
+                  </li>
+                )}
+                {parsed.meta.bookingNo && (
+                  <li>
+                    <b>M.BOOKING NO → Booking No</b>: {parsed.meta.bookingNo}
+                  </li>
+                )}
+                {parsed.meta.clpNumber && (
+                  <li>
+                    <b>CLP 번호</b>: {parsed.meta.clpNumber}
+                  </li>
+                )}
+                {parsed.meta.containerType && (
+                  <li>
+                    <b>SIZE</b>: {parsed.meta.containerType}
+                  </li>
+                )}
+                {parsed.meta.vessel && (
+                  <li>
+                    <b>VESSEL</b>: {parsed.meta.vessel}
+                  </li>
+                )}
+                {(parsed.meta.etd || parsed.meta.eta) && (
+                  <li>
+                    <b>ETD / ETA</b>: {parsed.meta.etd ?? "?"} → {parsed.meta.eta ?? "?"}
+                  </li>
+                )}
+              </ul>
+              <p className="mt-1 text-[11px] text-amber-700">
+                CLP 번호 / SIZE / VESSEL / ETD / ETA 는 ABOUT 칸에 한 줄로 모아 저장됩니다.
+              </p>
+            </div>
+          )}
+
+          {/* 사이즈 자동 추출 옵션 */}
+          <label className="flex items-center gap-2 rounded border border-neutral-200 bg-white px-2 py-1 text-xs">
+            <input
+              type="checkbox"
+              checked={extractDimensions}
+              onChange={(e) => setExtractDimensions(e.target.checked)}
+            />
+            <span className="text-neutral-700">
+              REMARK/메모 칸의 <span className="font-mono">112X145X165(2)</span> 같은 사이즈 텍스트를 가로×세로×높이로 자동 변환
+            </span>
+          </label>
+
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold text-neutral-700">
+              컬럼 매핑 ({parsed.rows.length}행)
+            </div>
+            <div className="text-[11px] text-neutral-500">
+              빈 헤더(<span className="font-mono">__EMPTY</span>)도 직접 매핑하거나 <b>무시</b>로 둘 수 있어요.
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
+            {parsed.headers.map((h) => {
+              const current = mapping[h] ?? "";
+              const isBookingMapped =
+                current && BOOKING_FIELD_SET.has(current as FieldKey);
+              const isCargoMapped =
+                current && CARGO_FIELD_SET.has(current as FieldKey);
+              return (
+                <label
+                  key={h}
+                  className={`flex items-center justify-between gap-2 rounded border px-2 py-1 ${
+                    isBookingMapped
+                      ? "border-emerald-200 bg-emerald-50"
+                      : isCargoMapped
+                        ? "border-blue-200 bg-blue-50"
+                        : "border-neutral-200 bg-white"
+                  }`}
+                >
+                  <span
+                    className="truncate font-mono text-neutral-700"
+                    title={h}
+                  >
+                    {displayHeader(h)}
+                  </span>
+                  <select
+                    value={current}
+                    onChange={(e) =>
+                      setMapping({
+                        ...mapping,
+                        [h]: e.target.value
+                          ? (e.target.value as FieldKey)
+                          : null,
+                      })
+                    }
+                    className="rounded border border-neutral-300 bg-white px-1 py-0.5"
+                  >
+                    <option value="">— 무시 —</option>
+                    <optgroup label="부킹 정보">
+                      {BOOKING_FIELDS.map((f) => (
+                        <option key={f} value={f}>
+                          {FIELD_LABELS[f]}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="화물 정보">
+                      {CARGO_FIELDS.map((f) => (
+                        <option key={f} value={f}>
+                          {FIELD_LABELS[f]}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <div className="text-[11px] text-neutral-500">
+              <span className="mr-2 inline-block h-2 w-2 rounded bg-emerald-300" />
+              부킹 매핑
+              <span className="ml-3 mr-2 inline-block h-2 w-2 rounded bg-blue-300" />
+              화물 매핑
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setParsed(null);
+                  setMapping({});
+                  if (fileRef.current) fileRef.current.value = "";
+                }}
+                className="rounded border border-neutral-300 px-3 py-1 text-xs"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmImport}
+                className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+              >
+                불러오기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function hasMeta(m: ExcelMeta): boolean {
+  return Boolean(
+    m.destination ||
+      m.bookingNo ||
+      m.clpNumber ||
+      m.containerType ||
+      m.vessel ||
+      m.etd ||
+      m.eta,
+  );
+}

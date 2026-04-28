@@ -1,0 +1,438 @@
+/**
+ * 엑셀/CSV 양식 파서 + 헤더-필드 자동 매핑
+ *
+ * 사용자의 실제 CLP 양식 특성:
+ *   - 1~9행: 회사 정보 + CLP 메타데이터(CLP 번호 / P.O.D / M.BOOKING NO / VESSEL / ETD/ETA / SIZE)
+ *   - 10행: 실제 컬럼 헤더 (No., House B/L, DEST, Booking No, 차수, H/B, E/P, N, 실화주, 화주, Q'TY, G.W/T, CFS CBM, ABOUT, REMARK)
+ *   - 11행~: 화물 데이터 (REMARK에 "112X145X165" 또는 "247x129x46(2)" 같은 사이즈 문자열이 들어 있을 수 있음)
+ *   - 셀 병합 때문에 같은 헤더가 여러 컬럼에 걸쳐 있고 빈 헤더(`__EMPTY_N`)도 자주 등장
+ */
+
+import * as XLSX from "xlsx";
+
+/** 화물(per-row) 필드 */
+export type CargoFieldKey =
+  | "itemName"
+  | "itemActualShipperName"
+  | "itemShipperName"
+  | "widthCm"
+  | "lengthCm"
+  | "heightCm"
+  | "quantity"
+  | "weightPerUnitKg"
+  | "cbm"
+  | "noStacking"
+  | "topOnly"
+  | "orientation"
+  | "heavierBelow"
+  | "itemRemark";
+
+/** 부킹(shipment-level) 필드 — 한 부킹에 공통이라 보통 첫 행 값을 채택 */
+export type BookingFieldKey =
+  | "displayNo"
+  | "houseBlNo"
+  | "destination"
+  | "bookingNo"
+  | "shipmentRound"
+  | "hb"
+  | "ep"
+  | "n"
+  | "actualShipperName"
+  | "shipperName"
+  | "about"
+  | "generalRemark";
+
+export type FieldKey = CargoFieldKey | BookingFieldKey;
+
+export interface ExcelMeta {
+  /** P.O.D — 도착항 / 목적지 */
+  destination?: string;
+  /** M.BOOKING NO — 마스터 부킹 번호 */
+  bookingNo?: string;
+  /** CLP 번호 (사내 관리번호) */
+  clpNumber?: string;
+  /** VESSEL / VOY (선박/항차) */
+  vessel?: string;
+  /** ETD (출항) */
+  etd?: string;
+  /** ETA (입항) */
+  eta?: string;
+  /** SIZE (40HQ, 20GP 등) */
+  containerType?: string;
+}
+
+export interface ParsedExcel {
+  headers: string[];
+  rows: Record<string, unknown>[];
+  /** 헤더 위쪽에서 추출한 부킹/CLP 메타데이터 */
+  meta: ExcelMeta;
+  /** 헤더로 인식된 행의 0-based 인덱스 */
+  headerRowIndex: number;
+}
+
+/** UI 그룹화용 — 부킹 필드와 화물 필드를 분리해서 보여줌 */
+export const BOOKING_FIELDS: BookingFieldKey[] = [
+  "displayNo",
+  "houseBlNo",
+  "destination",
+  "bookingNo",
+  "shipmentRound",
+  "hb",
+  "ep",
+  "n",
+  "actualShipperName",
+  "shipperName",
+  "about",
+  "generalRemark",
+];
+
+export const CARGO_FIELDS: CargoFieldKey[] = [
+  "itemName",
+  "itemActualShipperName",
+  "itemShipperName",
+  "widthCm",
+  "lengthCm",
+  "heightCm",
+  "quantity",
+  "weightPerUnitKg",
+  "cbm",
+  "noStacking",
+  "topOnly",
+  "orientation",
+  "heavierBelow",
+  "itemRemark",
+];
+
+/** 사용자 양식 표시용 한글 라벨 */
+export const FIELD_LABELS: Record<FieldKey, string> = {
+  // 부킹
+  displayNo: "No.",
+  houseBlNo: "House B/L",
+  destination: "DEST(목적지)",
+  bookingNo: "Booking No",
+  shipmentRound: "차수",
+  hb: "H/B",
+  ep: "E/P",
+  n: "N",
+  actualShipperName: "실화주",
+  shipperName: "화주",
+  about: "ABOUT",
+  generalRemark: "REMARK(부킹)",
+  // 화물
+  itemName: "품목명",
+  itemActualShipperName: "실화주(화물)",
+  itemShipperName: "화주(화물)",
+  widthCm: "가로(cm)",
+  lengthCm: "세로(cm)",
+  heightCm: "높이(cm)",
+  quantity: "수량",
+  weightPerUnitKg: "중량(kg/개)",
+  cbm: "CBM",
+  noStacking: "다단금지",
+  topOnly: "상단적재",
+  orientation: "방향제한",
+  heavierBelow: "중량조건",
+  itemRemark: "메모(화물) — REMARK 등",
+};
+
+/**
+ * 빈 헤더(`__EMPTY`, `__EMPTY_1`)를 사용자 친화적 표시명으로 변환.
+ * 매핑 키로는 원본 헤더(`__EMPTY...`)를 그대로 써야 행 데이터에 접근 가능하므로
+ * UI 표시용으로만 사용.
+ */
+export function displayHeader(h: string): string {
+  if (h === "__EMPTY") return "(빈 헤더)";
+  if (h.startsWith("__EMPTY_")) {
+    const n = h.slice("__EMPTY_".length);
+    return `(빈 헤더 ${n})`;
+  }
+  return h;
+}
+
+/** 사이즈 문자열 1건 (예: 247x129x46(2)) */
+export interface DimensionMatch {
+  width: number;
+  length: number;
+  height: number;
+  /** REMARK 텍스트에 명시된 sub-quantity (예: "(2)") */
+  count?: number;
+}
+
+/**
+ * REMARK 텍스트에서 사이즈 패턴 추출.
+ * 사용자 양식에서 관찰된 모든 표기를 지원:
+ *   A) 곱셈 기호 구분: "112X145X165", "247x129x46(2)", "60×60×40", "110*110*95"
+ *   B) 공백 + 슬래시 구분 (다중행): "180 90 27 / 1 / 190KG\n128 122 84 / 1 / 506KG"
+ *   C) 여러 사이즈 한 줄: "112X145X165 + 100x100x100" 도 전부 추출
+ */
+
+// 공백/슬래시 형식이 더 까다로우므로 먼저 시도. 매치되면 그것만 사용 (A 와 중복 방지)
+// 형태: W H L / count [/ weightKG]
+const PATTERN_SLASH = /(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\s*(\d+)\s*(?:\/\s*\d+(?:\.\d+)?\s*K?G)?/gi;
+
+// 형태: W [xX×*] H [xX×*] L (optional (count))
+const PATTERN_OP = /(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:\(\s*(\d+)\s*\))?/g;
+
+export function parseDimensionsFromText(s: string | null | undefined): DimensionMatch[] {
+  if (!s) return [];
+  const out: DimensionMatch[] = [];
+
+  // 1) 슬래시-카운트 형식 (다중행 가능) 먼저 시도
+  const reSlash = new RegExp(PATTERN_SLASH.source, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = reSlash.exec(s)) !== null) {
+    out.push({
+      width: Number(m[1]),
+      length: Number(m[2]),
+      height: Number(m[3]),
+      count: m[4] ? Number(m[4]) : undefined,
+    });
+  }
+  if (out.length > 0) return out;
+
+  // 2) 곱셈 기호(또는 *) 형식
+  const reOp = new RegExp(PATTERN_OP.source, "g");
+  while ((m = reOp.exec(s)) !== null) {
+    out.push({
+      width: Number(m[1]),
+      length: Number(m[2]),
+      height: Number(m[3]),
+      count: m[4] ? Number(m[4]) : undefined,
+    });
+  }
+  return out;
+}
+
+/**
+ * 엑셀 시트를 읽어 헤더 행을 자동 감지하고, 그 위 메타와 그 아래 데이터를 분리해서 반환.
+ */
+export async function parseExcelFile(file: File): Promise<ParsedExcel> {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const firstSheetName = wb.SheetNames[0];
+  if (!firstSheetName) {
+    return { headers: [], rows: [], meta: {}, headerRowIndex: 0 };
+  }
+  const sheet = wb.Sheets[firstSheetName];
+  const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: "",
+    raw: true,
+    blankrows: false,
+  });
+
+  const headerRowIndex = findHeaderRow(aoa);
+  const headerRow = (aoa[headerRowIndex] ?? []) as unknown[];
+  const meta = extractMeta(aoa.slice(0, headerRowIndex) as unknown[][]);
+
+  // 빈 헤더 셀은 __EMPTY_N 으로 키화 — 병합 셀 빈 칸도 따로 매핑할 수 있도록
+  const rawHeaders: string[] = headerRow.map((h, i) => {
+    if (typeof h === "string" && h.trim().length > 0) return h.trim();
+    if (typeof h === "number") return String(h);
+    return `__EMPTY_${i}`;
+  });
+  // 중복 헤더가 있을 수 있어 _2, _3 등을 붙여 유일화
+  const seen = new Map<string, number>();
+  const headers = rawHeaders.map((h) => {
+    const c = seen.get(h) ?? 0;
+    seen.set(h, c + 1);
+    return c === 0 ? h : `${h}_${c}`;
+  });
+
+  const rows: Record<string, unknown>[] = [];
+  for (let i = headerRowIndex + 1; i < aoa.length; i++) {
+    const row = (aoa[i] ?? []) as unknown[];
+    if (row.every((c) => c === "" || c == null)) continue;
+    const obj: Record<string, unknown> = {};
+    for (let j = 0; j < headers.length; j++) {
+      obj[headers[j]] = row[j] ?? "";
+    }
+    rows.push(obj);
+  }
+
+  return { headers, rows, meta, headerRowIndex };
+}
+
+/** "House B/L" / "Booking No" / "실화주" 가 있는 행을 헤더로 인식 */
+function findHeaderRow(aoa: unknown[][]): number {
+  const markers = ["house b/l", "booking no", "실화주", "화주", "q'ty"];
+  let bestIdx = 0;
+  let bestScore = 0;
+  for (let i = 0; i < aoa.length; i++) {
+    const row = aoa[i] ?? [];
+    const joined = row
+      .map((c) => String(c ?? "").trim().toLowerCase())
+      .join("|");
+    let score = 0;
+    for (const m of markers) {
+      if (joined.includes(m)) score++;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+    // 2개 이상 매치되면 바로 채택 (양식 예측 가능 시점)
+    if (score >= 3) return i;
+  }
+  return bestScore > 0 ? bestIdx : 0;
+}
+
+/** 헤더 위쪽 영역에서 "P.O.D : SINGAPORE" 같은 key:value 패턴을 끌어모음 */
+function extractMeta(metaRows: unknown[][]): ExcelMeta {
+  const meta: ExcelMeta = {};
+  for (const rawRow of metaRows) {
+    const cells = (rawRow ?? []).map((c) => String(c ?? "").trim());
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (!c) continue;
+      const lower = c.toLowerCase();
+
+      // P.O.D : SINGAPORE  /  P.O.D : HO CHI MINH CITY, VIETNAM
+      if (
+        !meta.destination &&
+        (lower.includes("p.o.d") ||
+          lower.startsWith("pod ") ||
+          lower === "pod" ||
+          lower.includes("port of discharge"))
+      ) {
+        const v = nextValue(cells, i);
+        if (v) meta.destination = v;
+      }
+
+      // M.BOOKING NO. : SNKO0102603...
+      if (!meta.bookingNo && lower.includes("booking no")) {
+        const v = nextValue(cells, i);
+        if (v) meta.bookingNo = v;
+      }
+
+      // CLP 번호 : ABSG2600012-1
+      if (!meta.clpNumber && (lower.includes("clp 번호") || lower.includes("clp number") || lower.includes("clp no"))) {
+        const v = nextValue(cells, i);
+        if (v) meta.clpNumber = v;
+      }
+
+      // VESSEL / VOY : TIANJIN VOYAGER / 2603S
+      if (!meta.vessel && (lower.startsWith("vessel") || lower.includes("vessel /"))) {
+        const v = nextValue(cells, i);
+        if (v) meta.vessel = v;
+      }
+
+      // ETD / ETA — 날짜 두 개가 같은 행에 있음 (라벨 + ETD + 사이값 + ETA)
+      if (lower.startsWith("etd") || lower.includes("etd/eta") || lower.includes("etd /")) {
+        const dates = collectDates(cells, i);
+        if (!meta.etd && dates[0]) meta.etd = dates[0];
+        if (!meta.eta && dates[1]) meta.eta = dates[1];
+      }
+
+      // SIZE : 40HQ
+      if (!meta.containerType && (lower === "size" || lower === "size :" || lower.startsWith("size "))) {
+        const v = nextValue(cells, i);
+        if (v && /\d/.test(v)) meta.containerType = v;
+      }
+    }
+  }
+  return meta;
+}
+
+/** 다음 비어있지 않은 셀의 값을 가져오되 ":-—" 구분문자는 떼어냄 */
+function nextValue(cells: string[], from: number): string | undefined {
+  for (let j = from + 1; j < cells.length; j++) {
+    const raw = cells[j];
+    if (!raw) continue;
+    const cleaned = raw.replace(/^[:\-—\s]+/u, "").trim();
+    if (cleaned.length > 0) return cleaned;
+  }
+  return undefined;
+}
+
+/** 한 행에서 yyyy-mm-dd 또는 yyyy/mm/dd 형식 날짜 토큰만 골라 순서대로 반환 */
+function collectDates(cells: string[], from: number): string[] {
+  const out: string[] = [];
+  const re = /\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/;
+  for (let j = from + 1; j < cells.length; j++) {
+    const m = cells[j]?.match(re);
+    if (m) out.push(m[0]);
+  }
+  return out;
+}
+
+/**
+ * 키워드 기반 헤더 → 필드 자동 매핑.
+ * - 짧은 헤더(N, H/B, E/P)는 정확 매칭만
+ * - REMARK 만 있을 땐 booking-level (generalRemark) 우선
+ * - 비교 시 공백/마침표/대소문자를 정규화 → "G. W/T" 같은 양식도 매칭
+ */
+const KEYWORDS: Record<FieldKey, string[]> = {
+  // 부킹
+  displayNo: ["순번", "번호"],
+  houseBlNo: ["house b/l", "house bl", "h.b/l", "h/b/l", "house bill", "houseBl"],
+  destination: ["dest", "destination", "도착지", "목적지", "p.o.d", "pod"],
+  bookingNo: ["booking no", "booking#", "booking number", "부킹"],
+  shipmentRound: ["차수", "round", "shipment round"],
+  hb: [],
+  ep: [],
+  n: [],
+  // 부킹 단위 화주 — 자동 매핑 키워드 비움. 화물 단위 fields 가 우선 매칭됨.
+  // 단일 화주 부킹의 경우 사용자가 드롭다운에서 직접 선택하면 됨.
+  actualShipperName: [],
+  shipperName: [],
+  about: ["about"],
+  // generalRemark = 부킹 단위 메모. 사용자 양식의 "REMARK" 는 화물 사이즈/특이사항이 들어가므로 itemRemark 우선.
+  generalRemark: ["리마크"],
+  // 화물
+  itemName: ["품목", "품명", "item name", "item"],
+  // 화물 단위 화주는 사용자 양식의 콘솔(TOTAL) 케이스 — 행마다 다른 화주
+  itemActualShipperName: ["실화주", "actual shipper", "real shipper"],
+  itemShipperName: ["화주", "shipper", "consignor"],
+  widthCm: ["가로", "width", "폭"],
+  lengthCm: ["세로", "length", "길이"],
+  heightCm: ["높이", "height"],
+  quantity: ["수량", "qty", "quantity", "개수", "q'ty", "qty pcs"],
+  weightPerUnitKg: ["중량", "weight", "kg", "무게", "g.w/t", "g.wt", "gross", "g/w"],
+  cbm: ["cbm", "부피", "cfs cbm"],
+  noStacking: ["다단금지", "no stack", "nostack", "no-stack"],
+  topOnly: ["상단적재", "상단", "top only", "toponly"],
+  orientation: ["방향", "orientation"],
+  heavierBelow: ["중량조건", "heavier below", "heavier"],
+  // itemRemark = 화물별 메모. 사용자 양식의 "REMARK" 컬럼은 사이즈 텍스트("112X145X165") 가 들어가므로 여기로 매핑.
+  itemRemark: ["메모", "비고", "note", "item remark", "remark"],
+};
+
+function compact(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, "").replace(/\./g, "");
+}
+
+function guessField(header: string): FieldKey | null {
+  const trimmed = header.trim();
+  if (!trimmed) return null;
+  if (trimmed === "__EMPTY" || trimmed.startsWith("__EMPTY_")) return null;
+
+  const lower = trimmed.toLowerCase();
+  const cmpct = compact(trimmed);
+
+  // 짧은 코드성 헤더는 정확 매칭
+  if (lower === "no." || lower === "no" || cmpct === "no" || cmpct === "순번") return "displayNo";
+  if (lower === "h/b" || lower === "hb" || cmpct === "h/b") return "hb";
+  if (lower === "e/p" || lower === "ep" || cmpct === "e/p") return "ep";
+  if (lower === "n") return "n";
+
+  // 화물 단위 fields 를 우선 시도 — "실화주/화주" 같은 양식 컬럼은 콘솔의 경우 행마다 다르므로
+  const ordered: FieldKey[] = [...CARGO_FIELDS, ...BOOKING_FIELDS];
+  for (const field of ordered) {
+    for (const kw of KEYWORDS[field]) {
+      if (cmpct.includes(compact(kw))) return field;
+    }
+  }
+  return null;
+}
+
+/** 헤더 배열을 받아 필드 매핑 추정 — 결과는 사용자가 UI 에서 보정 */
+export function mapHeadersToFields(
+  headers: string[],
+): Record<string, FieldKey | null> {
+  const out: Record<string, FieldKey | null> = {};
+  for (const h of headers) {
+    out[h] = guessField(h);
+  }
+  return out;
+}

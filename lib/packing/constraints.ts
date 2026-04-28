@@ -1,0 +1,95 @@
+/**
+ * 적재 제약 조건 검사 — 순수 함수 모음
+ *
+ * 알고리즘 본체에서 분리한 이유:
+ *  - 단위 테스트 용이성 (입력만 보고 판단 가능)
+ *  - 비즈니스 룰(다단금지/상단적재/방향제한/중량조건)이 추후 변경될 때 한 곳에서 수정
+ */
+
+import type { CargoSpec } from "../../types/cargo.ts";
+import type { ContainerSpec } from "../../types/container.ts";
+
+/**
+ * 회전 여부에 따른 실효 사이즈 (width, length 스왑).
+ * 높이는 회전과 무관.
+ */
+export function effectiveSize(
+  item: Pick<CargoSpec, "width" | "length" | "height">,
+  rotated: boolean,
+): { width: number; length: number; height: number } {
+  if (rotated) {
+    return { width: item.length, length: item.width, height: item.height };
+  }
+  return { width: item.width, length: item.length, height: item.height };
+}
+
+/**
+ * 화물이 회전 상태에서 컨테이너 내부 사이즈에 들어가는지 검사.
+ * (단순 차원 체크, 다른 화물과의 충돌 검사는 알고리즘에서 별도 수행)
+ */
+export function canFitDimensions(
+  item: Pick<CargoSpec, "width" | "length" | "height">,
+  container: ContainerSpec,
+  rotated: boolean,
+): boolean {
+  const size = effectiveSize(item, rotated);
+  return (
+    size.width <= container.innerWidth &&
+    size.length <= container.innerLength &&
+    size.height <= container.innerHeight
+  );
+}
+
+/**
+ * 회전이 리마크의 방향제한과 양립하는지 검사.
+ * - free: 자유 회전 가능
+ * - long_along_length: 장축이 컨테이너 길이방향 — 회전 후 length가 width보다 길거나 같아야 함
+ * - fixed: 회전 금지
+ */
+export function respectsOrientation(
+  item: Pick<CargoSpec, "width" | "length" | "remarks">,
+  rotated: boolean,
+): boolean {
+  const orientation = item.remarks.orientation;
+  if (orientation === "free") return true;
+  if (orientation === "fixed") return rotated === false;
+  if (orientation === "long_along_length") {
+    const eff = effectiveSize(
+      { width: item.width, length: item.length, height: 0 },
+      rotated,
+    );
+    // 길이방향(length)이 폭(width)보다 짧으면 장축이 길이방향이 아니다
+    return eff.length >= eff.width;
+  }
+  return true;
+}
+
+/**
+ * top 화물을 bottom 화물 위에 쌓아도 되는지 검사.
+ * - bottom이 다단금지(noStacking)면 불가
+ * - 중량조건(heavierBelow)이 어느 한 쪽이라도 켜져 있으면 bottom이 더 무거워야 함
+ */
+export function canStackOn(
+  top: Pick<CargoSpec, "weightPerUnit" | "remarks">,
+  bottom: Pick<CargoSpec, "weightPerUnit" | "remarks">,
+): boolean {
+  if (bottom.remarks.noStacking) return false;
+  const heavierBelowRequired =
+    top.remarks.heavierBelow || bottom.remarks.heavierBelow;
+  if (heavierBelowRequired && bottom.weightPerUnit < top.weightPerUnit) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 누적 중량 + 추가 중량이 컨테이너 최대 중량 미만인지 검사.
+ * 사용자 기준이 "<"(미만)이므로 등호는 포함하지 않는다.
+ */
+export function withinWeightLimit(
+  currentWeight: number,
+  addWeight: number,
+  container: ContainerSpec,
+): boolean {
+  return currentWeight + addWeight < container.maxWeightKg;
+}

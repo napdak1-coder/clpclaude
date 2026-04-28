@@ -1,0 +1,31 @@
+{
+  "name": "clpnice",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "db:init": "node scripts/db-init.mjs",
+    "test": "node --test --experimental-strip-types lib/packing/algorithm.test.ts"
+  },
+  "dependencies": {
+    "next": "^15.5.6",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "@libsql/client": "^0.15.0",
+    "lz-string": "^1.5.0",
+    "xlsx": "^0.18.5",
+    "jspdf": "^2.5.2",
+    "html2canvas": "^1.4.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/postcss": "^4.0.0",
+    "postcss": "^8.4.49"
+  }
+}
