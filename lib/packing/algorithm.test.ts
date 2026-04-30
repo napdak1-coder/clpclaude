@@ -24,6 +24,7 @@ function makeCargo(over: Partial<CargoSpec> & { id: string }): CargoSpec {
     id: over.id,
     shipmentId: over.shipmentId ?? "ship-1",
     sortOrder: over.sortOrder ?? 0,
+    cargoType: over.cargoType ?? "PL",
     itemName: over.itemName,
     width: over.width ?? 100,
     length: over.length ?? 100,
@@ -31,6 +32,8 @@ function makeCargo(over: Partial<CargoSpec> & { id: string }): CargoSpec {
     quantity: over.quantity ?? 1,
     weightPerUnit: over.weightPerUnit ?? 100,
     cbm: over.cbm,
+    aboutCbm: over.aboutCbm,
+    unitSizes: over.unitSizes,
     remarks: { ...baseRemark, ...(over.remarks ?? {}) },
   };
 }
@@ -159,16 +162,88 @@ describe("pack — 중량조건 (heavierBelow)", () => {
   });
 });
 
+describe("pack — 카톤(CT) 분리", () => {
+  it("CT 화물(입고전, aboutCbm 만)은 시각 unit 으로 안 들어가고 ctCbm 에 합산된다", () => {
+    const cargoes = [
+      makeCargo({
+        id: "regular",
+        cargoType: "PL",
+        width: 100,
+        length: 100,
+        height: 100,
+      }),
+      // CT 카톤 + 입고전 — c.cbm null, aboutCbm 5
+      // (cbm 이 채워지면 입고완료로 우선 분류되므로 입고전 케이스 명시)
+      makeCargo({
+        id: "carton",
+        cargoType: "CT",
+        width: 50,
+        length: 50,
+        height: 50,
+        cbm: undefined,
+        aboutCbm: 5,
+      }),
+    ];
+    const result = pack(cargoes, "40ft_only");
+    const visualUnits = result.containers.reduce(
+      (s, c) =>
+        s +
+        c.rows.reduce((rs, r) => rs + r.bottomItems.length + r.topItems.length, 0),
+      0,
+    );
+    assert.equal(visualUnits, 1, "CT 는 시각 unit 으로 들어가지 않아야 함");
+    assert.ok(
+      result.containers[0].ctCbm > 0,
+      `CT 화물 CBM 은 ctCbm 에 합산 (실제 ${result.containers[0].ctCbm})`,
+    );
+    assert.equal(result.summary.ctTotalCbm, 5);
+  });
+});
+
+describe("pack — 입고완료 그룹 몰기", () => {
+  it("입고완료 화물(c.cbm 입력) 은 한 컨테이너에 합산된다", () => {
+    const cargoes = [
+      // 일반화물 50 m³ — 40FT 필요
+      makeCargo({
+        id: "a",
+        cargoType: "PL",
+        width: 200,
+        length: 200,
+        height: 250,
+        quantity: 5,
+      }),
+      // 입고완료 25 m³ — 20FT 한 대에 몰리길 기대
+      makeCargo({
+        id: "completed",
+        cargoType: "PL",
+        width: 100,
+        length: 100,
+        height: 100,
+        cbm: 25,
+      }),
+    ];
+    const result = pack(cargoes, "auto");
+    // 컨테이너 2개 (40FT + 20FT 또는 40FT + 40FT)
+    assert.ok(result.containers.length >= 1);
+    // 입고완료 CBM 합계가 1개 컨테이너에 몰려야 함
+    const containersWithCompleted = result.containers.filter((c) => c.completedCbm > 0);
+    assert.equal(containersWithCompleted.length, 1, "입고완료 CBM 은 1개 컨테이너에 몰림");
+    assert.equal(containersWithCompleted[0].completedCbm, 25);
+    assert.equal(result.summary.completedTotalCbm, 25);
+  });
+});
+
 describe("pack — 중량 한도", () => {
   it("총 화물 중량이 컨테이너 한도 미만이어야 한다 (40FT < 25000kg)", () => {
-    // 단일 화물 800kg × 30개 = 24000kg → 40FT 한도(25000) 미만
+    // 새 시맨틱: weightPerUnit 은 행 총중량(엑셀 G.W/T) 으로 해석되어 quantity 로 나뉘어 단위중량이 됨.
+    // 행 총중량 24000kg → 단위중량 800kg × 30 = 24000kg, 40FT 한도(25000) 미만
     const cargoes = [
       makeCargo({
         id: "c1",
         width: 100,
         length: 100,
         height: 100,
-        weightPerUnit: 800,
+        weightPerUnit: 24000,
         quantity: 30,
       }),
     ];
@@ -182,14 +257,14 @@ describe("pack — 중량 한도", () => {
   });
 
   it("중량 한도를 넘는 화물은 다음 컨테이너로 분산되거나 unplaced 처리된다", () => {
-    // 2000kg × 20개 = 40000kg → 40FT 1대로는 부족
+    // 행 총중량 40000kg (단위중량 2000kg × 20개) → 40FT 1대로는 부족
     const cargoes = [
       makeCargo({
         id: "c1",
         width: 100,
         length: 100,
         height: 100,
-        weightPerUnit: 2000,
+        weightPerUnit: 40000,
         quantity: 20,
       }),
     ];

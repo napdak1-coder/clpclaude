@@ -9,6 +9,32 @@ import {
   type CargoItemInput,
   type ShipmentInput,
 } from "@/lib/repositories/shipments";
+import type { UnitSize } from "@/types/cargo";
+
+/** unitSizes 입력 정제 — 양수 4튜플만 통과 */
+function parseUnitSizesInput(raw: unknown): UnitSize[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: UnitSize[] = [];
+  for (const v of raw) {
+    if (!v || typeof v !== "object") continue;
+    const o = v as Record<string, unknown>;
+    const w = Number(o.width);
+    const l = Number(o.length);
+    const h = Number(o.height);
+    const q = Number(o.quantity);
+    const wt = Number(o.weight);
+    if (!Number.isFinite(w) || !Number.isFinite(l) || !Number.isFinite(h) || !Number.isFinite(q)) continue;
+    if (w <= 0 || l <= 0 || h <= 0 || q <= 0) continue;
+    out.push({
+      width: w,
+      length: l,
+      height: h,
+      quantity: q,
+      weight: Number.isFinite(wt) && wt >= 0 ? wt : 0,
+    });
+  }
+  return out.length > 0 ? out : null;
+}
 
 interface ApiOk<T> {
   success: true;
@@ -76,6 +102,9 @@ function validateInput(input: unknown): ShipmentInput {
       quantity,
       weightPerUnitKg,
       cbm: typeof it.cbm === "number" ? it.cbm : null,
+      aboutCbm: typeof it.aboutCbm === "number" ? it.aboutCbm : null,
+      cargoType: typeof it.cargoType === "string" ? it.cargoType : null,
+      unitSizes: parseUnitSizesInput(it.unitSizes),
       noStacking: it.noStacking === true,
       topOnly: it.topOnly === true,
       orientation:

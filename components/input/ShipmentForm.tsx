@@ -11,6 +11,7 @@
 
 import { useState } from "react";
 import type { ShipmentDetail } from "@/lib/repositories/shipments";
+import type { CargoType, UnitSize } from "@/types/cargo";
 import { CargoTable, makeEmptyRow, type CargoRow } from "./CargoTable";
 import { ExcelImport } from "./ExcelImport";
 
@@ -31,6 +32,7 @@ export interface ShipmentFormSubmit {
   items: {
     id?: string;
     sortOrder: number;
+    cargoType: CargoType;
     itemName: string | null;
     actualShipperName: string | null;
     shipperName: string | null;
@@ -40,6 +42,8 @@ export interface ShipmentFormSubmit {
     quantity: number;
     weightPerUnitKg: number;
     cbm: number | null;
+    aboutCbm: number | null;
+    unitSizes: UnitSize[] | null;
     noStacking: boolean;
     topOnly: boolean;
     orientation: "free" | "long_along_length" | "fixed";
@@ -109,6 +113,7 @@ function rowsFromInitial(d: ShipmentDetail): CargoRow[] {
     rowKey: it.id || crypto.randomUUID(),
     id: it.id,
     sortOrder: it.sortOrder ?? idx,
+    cargoType: it.cargoType ?? "CT",
     itemName: it.itemName ?? "",
     actualShipperName: it.actualShipperName ?? "",
     shipperName: it.shipperName ?? "",
@@ -118,7 +123,8 @@ function rowsFromInitial(d: ShipmentDetail): CargoRow[] {
     quantity: it.quantity,
     weightPerUnitKg: it.weightPerUnit,
     cbm: it.cbm ?? null,
-    cbmAuto: it.cbm == null,
+    aboutCbm: it.aboutCbm ?? null,
+    unitSizes: it.unitSizes,
     noStacking: it.remarks.noStacking,
     topOnly: it.remarks.topOnly,
     orientation: it.remarks.orientation,
@@ -196,6 +202,7 @@ export function ShipmentForm({
       items: rows.map((r, idx) => ({
         id: r.id,
         sortOrder: r.sortOrder ?? idx,
+        cargoType: r.cargoType,
         itemName: toNullableText(r.itemName),
         actualShipperName: toNullableText(r.actualShipperName),
         shipperName: toNullableText(r.shipperName),
@@ -205,6 +212,8 @@ export function ShipmentForm({
         quantity: r.quantity,
         weightPerUnitKg: r.weightPerUnitKg,
         cbm: r.cbm,
+        aboutCbm: r.aboutCbm,
+        unitSizes: r.unitSizes && r.unitSizes.length > 0 ? r.unitSizes : null,
         noStacking: r.noStacking,
         topOnly: r.topOnly,
         orientation: r.orientation,
@@ -226,127 +235,7 @@ export function ShipmentForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <section className="rounded-lg border border-neutral-200 bg-white p-4">
-        <h3 className="mb-3 text-sm font-semibold text-neutral-800">
-          부킹 정보
-        </h3>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          <Field label="No." htmlFor="display_no">
-            <input
-              id="display_no"
-              type="number"
-              value={booking.displayNo}
-              onChange={(e) => updateBooking({ displayNo: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="House B/L" htmlFor="house_bl">
-            <input
-              id="house_bl"
-              type="text"
-              value={booking.houseBlNo}
-              onChange={(e) => updateBooking({ houseBlNo: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="DEST" htmlFor="dest">
-            <input
-              id="dest"
-              type="text"
-              value={booking.destination}
-              onChange={(e) => updateBooking({ destination: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="Booking No" htmlFor="booking_no">
-            <input
-              id="booking_no"
-              type="text"
-              value={booking.bookingNo}
-              onChange={(e) => updateBooking({ bookingNo: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="차수" htmlFor="round">
-            <input
-              id="round"
-              type="number"
-              value={booking.shipmentRound}
-              onChange={(e) =>
-                updateBooking({ shipmentRound: e.target.value })
-              }
-              className={inputCls}
-            />
-          </Field>
-          <Field label="H/B" htmlFor="hb">
-            <input
-              id="hb"
-              type="text"
-              value={booking.hb}
-              onChange={(e) => updateBooking({ hb: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="E/P" htmlFor="ep">
-            <input
-              id="ep"
-              type="text"
-              value={booking.ep}
-              onChange={(e) => updateBooking({ ep: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="N" htmlFor="n">
-            <input
-              id="n"
-              type="text"
-              value={booking.n}
-              onChange={(e) => updateBooking({ n: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="실화주" htmlFor="actual_shipper">
-            <input
-              id="actual_shipper"
-              type="text"
-              value={booking.actualShipperName}
-              onChange={(e) =>
-                updateBooking({ actualShipperName: e.target.value })
-              }
-              className={inputCls}
-            />
-          </Field>
-          <Field label="화주" htmlFor="shipper">
-            <input
-              id="shipper"
-              type="text"
-              value={booking.shipperName}
-              onChange={(e) => updateBooking({ shipperName: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="ABOUT" htmlFor="about">
-            <input
-              id="about"
-              type="text"
-              value={booking.about}
-              onChange={(e) => updateBooking({ about: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="REMARK(부킹)" htmlFor="general_remark">
-            <input
-              id="general_remark"
-              type="text"
-              value={booking.generalRemark}
-              onChange={(e) =>
-                updateBooking({ generalRemark: e.target.value })
-              }
-              className={inputCls}
-            />
-          </Field>
-        </div>
-      </section>
+      {/* 부킹 정보 입력 영역은 UI에서 제거됨 — 부킹 레벨 데이터는 엑셀 import 또는 초기값 그대로 유지·저장된다 */}
 
       <section>
         <ExcelImport
@@ -362,7 +251,10 @@ export function ShipmentForm({
                 return next;
               });
             }
-            // 화물은 기존 표 끝에 추가 (빈 기본 행이 1개만 있으면 교체)
+            // 화물 행 처리:
+            //  - 빈 기본 행 1개뿐이면 교체
+            //  - 그 외(기존 데이터 있음) 사용자에게 확인:
+            //     OK → 교체 (기존 행 폐기)  /  취소 → 끝에 추가
             if (importedRows.length > 0) {
               setRows((prev) => {
                 const onlyEmpty =
@@ -371,7 +263,11 @@ export function ShipmentForm({
                   prev[0].lengthCm === 0 &&
                   prev[0].heightCm === 0 &&
                   !prev[0].itemName;
-                return onlyEmpty ? importedRows : [...prev, ...importedRows];
+                if (onlyEmpty) return importedRows;
+                const replace = window.confirm(
+                  `기존 화물 ${prev.length}행이 있습니다.\n\n확인: 교체 (기존 행 모두 삭제 후 새 ${importedRows.length}행만)\n취소: 끝에 추가 (총 ${prev.length + importedRows.length}행)`,
+                );
+                return replace ? importedRows : [...prev, ...importedRows];
               });
             }
           }}
@@ -380,7 +276,7 @@ export function ShipmentForm({
 
       <section>
         <h3 className="mb-2 text-sm font-semibold text-neutral-800">
-          화물 명세
+          화물 목록
         </h3>
         <CargoTable rows={rows} onChange={setRows} />
       </section>

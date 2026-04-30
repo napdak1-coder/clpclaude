@@ -1,12 +1,18 @@
 /**
- * CLP 적재 휴리스틱 알고리즘
+ * CLP 적재 알고리즘 — 물리/규칙 기반 (점수 비교 없음)
  *
- * 최적해(NP-hard 3D bin-packing)를 풀지 않고 "현장에서 통할 만한" 결과를 빠르게 만든다.
- *  - Row 단위 그리디 배치 (행 = 컨테이너 길이방향 슬라이스)
- *  - 무거운 화물부터 → 큰 사이즈부터
- *  - 상단적재(topOnly)는 일반 화물 배치 후 별도 패스
- *
- * 추후 GA/ILP로 교체할 수 있도록 입출력은 명확한 타입으로만 표현.
+ * 흐름:
+ *  1) 화물 분류
+ *      - 일반 (cargoType ∈ PL/WB/WC/WD/CR/CL) — 시각 적재 대상
+ *          ├─ topOnly 표시 (별도 큐, 일반 배치 후 빈 top 슬롯)
+ *          └─ 일반
+ *      - 카톤 CT — 시각 X, 컨테이너 여유 CBM 에 합산만
+ *      - 입고완료 (cargoType 무관, c.cbm != null) — 한 컨테이너에 몰아 합산
+ *  2) 시스템 CBM 합산 (입고완료/CT/일반)
+ *  3) 컨테이너 결정 — 오직 CBM 으로, 컨테이너 수 최소
+ *  4) 입고완료 그룹 → 들어가는 가장 작은 컨테이너 1개에 몰기
+ *  5) topOnly → 일반화물 입력 순서로 물리 fit
+ *  6) CT 화물 CBM → 컨테이너별 남은 여유 CBM 에 합산
  */
 
 import {
@@ -38,25 +44,22 @@ import {
   withinWeightLimit,
 } from "./constraints.ts";
 
-/** 알고리즘 내부에서 다루는 1개 단위 화물 (quantity=1로 풀어 놓은 것) */
 interface UnitItem {
-  unitId: string;       // 컨테이너 안에서 식별 (cargoId-인덱스)
-  cargoId: string;      // 원본 CargoSpec.id
+  unitId: string;
+  cargoId: string;
   shipper: string;
   name?: string;
   width: number;
   length: number;
   height: number;
-  weight: number;       // 단위 중량
+  weight: number;
   remarks: Remark;
 }
 
-/** Row 누적 상태 (배치 중 갱신) */
 interface RowState {
   index: number;
   yStart: number;
   yEnd: number;
-  /** 폭 방향 누적 — 다음 화물이 시작될 x 좌표 */
   xCursor: number;
   bottomItems: PlacedCargo[];
   topItems: PlacedCargo[];
@@ -64,71 +67,216 @@ interface RowState {
   topMaxHeight: number;
 }
 
-/** 컨테이너 누적 상태 */
 interface ContainerState {
   index: number;
   spec: ContainerSpec;
   rows: RowState[];
-  /** 다음 행이 시작될 y 좌표 */
   yCursor: number;
   totalWeight: number;
+  /** 시각 unit (placed) 의 CBM 누적 — 패킹 중 실시간 갱신 */
+  visualCbm: number;
+  /** CT 화물 CBM 누적 (시각 unit 없이 합산만) */
+  ctCbm: number;
+  /** 입고완료 화물 CBM 누적 */
+  completedCbm: number;
+}
+
+const REGULAR_TYPES = new Set(["PL", "WB", "WC", "WD", "CR", "CL"]);
+
+/** cargo CBM 헬퍼 — unitSizes 우선, 없으면 대표 W*L*H*Q */
+function cargoCbm(c: CargoSpec): number {
+  if (c.unitSizes && c.unitSizes.length > 0) {
+    return c.unitSizes.reduce(
+      (s, u) => s + (u.width * u.length * u.height * u.quantity) / 1_000_000,
+      0,
+    );
+  }
+  return (c.width * c.length * c.height * c.quantity) / 1_000_000;
+}
+
+/** cargo 총중량 헬퍼 — unitSizes 있으면 그룹별 합, 없으면 c.weightPerUnit (G.W/T) */
+function cargoTotalWeight(c: CargoSpec): number {
+  if (c.unitSizes && c.unitSizes.length > 0) {
+    return c.unitSizes.reduce((s, u) => s + (u.weight ?? 0) * u.quantity, 0);
+  }
+  return c.weightPerUnit ?? 0;
 }
 
 /**
- * CargoSpec을 quantity 만큼 풀어 단위 아이템 배열을 만든다.
- * shipperName이 CargoSpec에 없으므로 알고리즘 호출자가 별도로 채워두지 않는 한 ""로 둔다.
+ * CargoSpec 을 단위 unit 으로 분해. unitSizes 우선, 없으면 대표 사이즈 × quantity.
+ * weight 는 단위 무게 — unitSizes 있으면 그룹 weight, 없으면 c.weightPerUnit / quantity.
  */
-function expand(cargoes: CargoSpec[]): UnitItem[] {
+function expandToUnits(cargoes: CargoSpec[]): UnitItem[] {
   const out: UnitItem[] = [];
   for (const c of cargoes) {
-    for (let i = 0; i < c.quantity; i += 1) {
-      out.push({
-        unitId: `${c.id}-${i}`,
-        cargoId: c.id,
-        // 라벨 우선순위: 화주 → 실화주 → 품목명
-        shipper: c.shipperName ?? c.actualShipperName ?? c.itemName ?? "",
-        name: c.itemName,
-        width: c.width,
-        length: c.length,
-        height: c.height,
-        weight: c.weightPerUnit,
-        remarks: { ...c.remarks },
-      });
+    const shipperLabel = c.shipperName ?? c.actualShipperName ?? c.itemName ?? "";
+    const remarks = { ...c.remarks };
+    if (c.unitSizes && c.unitSizes.length > 0) {
+      const totalUnits = c.unitSizes.reduce((s, u) => s + u.quantity, 0) || c.quantity;
+      const fallback = totalUnits > 0 ? (c.weightPerUnit ?? 0) / totalUnits : 0;
+      let i = 0;
+      for (const u of c.unitSizes) {
+        const w = u.weight && u.weight > 0 ? u.weight : fallback;
+        for (let k = 0; k < u.quantity; k++) {
+          out.push({
+            unitId: `${c.id}-${i++}`,
+            cargoId: c.id,
+            shipper: shipperLabel,
+            name: c.itemName,
+            width: u.width,
+            length: u.length,
+            height: u.height,
+            weight: w,
+            remarks,
+          });
+        }
+      }
+    } else {
+      const perUnit = c.quantity > 0 ? (c.weightPerUnit ?? 0) / c.quantity : 0;
+      for (let i = 0; i < c.quantity; i++) {
+        out.push({
+          unitId: `${c.id}-${i}`,
+          cargoId: c.id,
+          shipper: shipperLabel,
+          name: c.itemName,
+          width: c.width,
+          length: c.length,
+          height: c.height,
+          weight: perUnit,
+          remarks,
+        });
+      }
     }
   }
   return out;
 }
 
-/**
- * 정렬: 무거운→큰 순서. topOnly는 별도 큐에서 처리.
- * 중량 동률이면 길이→폭 순으로 큰 것 먼저.
- */
-function sortMainQueue(items: UnitItem[]): UnitItem[] {
-  return [...items].sort((a, b) => {
-    if (b.weight !== a.weight) return b.weight - a.weight;
-    if (b.length !== a.length) return b.length - a.length;
-    return b.width - a.width;
-  });
+/** 화물 분류 */
+interface ClassifiedCargoes {
+  /** 시각 적재 대상 cargo (입고완료 제외, CT 제외, 정상 6종) */
+  visualCargoes: CargoSpec[];
+  /** CT 카톤 — 시각 X, CBM 만 */
+  ctCargoes: CargoSpec[];
+  /** 입고완료 — c.cbm != null 인 모든 행, 한 컨테이너에 CBM 합산 */
+  completedCargoes: CargoSpec[];
 }
 
-/** UnitItem을 CargoSpec 일부로 어댑트 (제약 함수 호환) */
-function asCargoLike(
-  u: UnitItem,
-): Pick<CargoSpec, "width" | "length" | "height" | "weightPerUnit" | "remarks"> {
+function classify(cargoes: CargoSpec[]): ClassifiedCargoes {
+  const visualCargoes: CargoSpec[] = [];
+  const ctCargoes: CargoSpec[] = [];
+  const completedCargoes: CargoSpec[] = [];
+  for (const c of cargoes) {
+    // 입고완료 우선 — 시각 적재 자체를 안 함
+    if (c.cbm != null && c.cbm > 0) {
+      completedCargoes.push(c);
+      continue;
+    }
+    if (c.cargoType === "CT") {
+      ctCargoes.push(c);
+      continue;
+    }
+    if (REGULAR_TYPES.has(c.cargoType)) {
+      visualCargoes.push(c);
+      continue;
+    }
+    // 알 수 없는 타입은 안전하게 CT 로 처리
+    ctCargoes.push(c);
+  }
+  return { visualCargoes, ctCargoes, completedCargoes };
+}
+
+/**
+ * 컨테이너 종류·개수 결정 — 점수 없이, 오직 CBM 기준.
+ *
+ * 흐름:
+ *  - 모드 = 20ft_only / 40ft_only: ceil(totalCbm / maxCbm) 만큼 그 타입만
+ *  - 모드 = auto:
+ *      가능한 (n40, n20) 조합 중 totalCbm 수용 가능한 것들을 모은 뒤
+ *      ① 컨테이너 수 (n40+n20) 최소 인 조합
+ *      ② 동률이면 입고완료 CBM 을 단독 컨테이너 1대에 몰 수 있는 조합 우선
+ *      ③ 그래도 동률이면 컨테이너 수 적게 하면서 40FT 비율 높은 쪽
+ */
+function decideContainers(
+  totalCbm: number,
+  completedCbm: number,
+  mode: ContainerMode,
+): ContainerType[] {
+  const cbm20 = getContainerCbm(CONTAINERS["20FT"]);
+  const cbm40 = getContainerCbm(CONTAINERS["40FT"]);
+
+  if (mode === "20ft_only") {
+    const count = Math.max(1, Math.ceil(totalCbm / cbm20));
+    return Array.from({ length: count }, () => "20FT");
+  }
+  if (mode === "40ft_only") {
+    const count = Math.max(1, Math.ceil(totalCbm / cbm40));
+    return Array.from({ length: count }, () => "40FT");
+  }
+
+  // auto — 가능한 모든 (n40, n20) 조합
+  const maxN40 = Math.max(1, Math.ceil(totalCbm / cbm40)) + 1;
+  const maxN20 = Math.max(1, Math.ceil(totalCbm / cbm20)) + 1;
+  type Combo = { n40: number; n20: number; total: number; capacity: number };
+  const candidates: Combo[] = [];
+  for (let n40 = 0; n40 <= maxN40; n40++) {
+    for (let n20 = 0; n20 <= maxN20; n20++) {
+      const total = n40 + n20;
+      if (total === 0) continue;
+      const capacity = n40 * cbm40 + n20 * cbm20;
+      if (capacity < totalCbm) continue;
+      candidates.push({ n40, n20, total, capacity });
+    }
+  }
+  if (candidates.length === 0) {
+    // 이론상 도달 불가 — 안전 폴백
+    return ["40FT"];
+  }
+  // 1순위: 컨테이너 수 최소
+  const minTotal = Math.min(...candidates.map((c) => c.total));
+  const minCount = candidates.filter((c) => c.total === minTotal);
+
+  // 2순위: 입고완료 CBM 을 단일 컨테이너에 수용 가능한 조합
+  let prefer = minCount;
+  if (completedCbm > 0) {
+    const fits = minCount.filter(
+      (c) =>
+        (c.n20 > 0 && completedCbm <= cbm20) ||
+        (c.n40 > 0 && completedCbm <= cbm40),
+    );
+    if (fits.length > 0) prefer = fits;
+  }
+
+  // 3순위: 잉여 용량(capacity - totalCbm) 가장 적은 조합 → 가장 알맞은 크기
+  const minSlack = Math.min(...prefer.map((c) => c.capacity - totalCbm));
+  prefer = prefer.filter((c) => c.capacity - totalCbm === minSlack);
+
+  // 4순위: 40FT 비율 높은 쪽 (작은 컨 적게) 우선
+  prefer.sort((a, b) => b.n40 - a.n40);
+  const best = prefer[0];
+  return [
+    ...Array.from<ContainerType>({ length: best.n40 }, () => "40FT"),
+    ...Array.from<ContainerType>({ length: best.n20 }, () => "20FT"),
+  ];
+}
+
+function makeContainer(index: number, spec: ContainerSpec): ContainerState {
   return {
-    width: u.width,
-    length: u.length,
-    height: u.height,
-    weightPerUnit: u.weight,
-    remarks: u.remarks,
+    index,
+    spec,
+    rows: [],
+    yCursor: 0,
+    totalWeight: 0,
+    visualCbm: 0,
+    ctCbm: 0,
+    completedCbm: 0,
   };
 }
 
-/**
- * 회전 옵션 두 가지를 시도해서 컨테이너 내부에 들어가고 방향제약도 만족하는 회전 선택.
- * 우선순위: 회전 안 함 → 회전.
- * 둘 다 불가하면 null.
- */
+/** 컨테이너의 남은 CBM 여유 = maxCbm - (visual + ct + completed) */
+function remainingCbm(c: ContainerState): number {
+  return getContainerCbm(c.spec) - (c.visualCbm + c.ctCbm + c.completedCbm);
+}
+
 function pickRotation(item: UnitItem, container: ContainerSpec): boolean | null {
   for (const rotated of [false, true]) {
     if (
@@ -141,25 +289,19 @@ function pickRotation(item: UnitItem, container: ContainerSpec): boolean | null 
   return null;
 }
 
-/** 새 컨테이너 상태 */
-function makeContainer(index: number, spec: ContainerSpec): ContainerState {
+function asCargoLike(
+  u: UnitItem,
+): Pick<CargoSpec, "width" | "length" | "height" | "weightPerUnit" | "remarks"> {
   return {
-    index,
-    spec,
-    rows: [],
-    yCursor: 0,
-    totalWeight: 0,
+    width: u.width,
+    length: u.length,
+    height: u.height,
+    weightPerUnit: u.weight,
+    remarks: u.remarks,
   };
 }
 
-/**
- * 새 Row를 연다. yStart는 현재 yCursor, yEnd는 첫 화물의 길이로 결정된다.
- * 화물을 함께 배치하므로 첫 화물 정보를 받는다.
- */
-function openRow(
-  c: ContainerState,
-  rowLength: number,
-): RowState | null {
+function openRow(c: ContainerState, rowLength: number): RowState | null {
   const yEnd = c.yCursor + rowLength;
   if (yEnd > c.spec.innerLength) return null;
   const row: RowState = {
@@ -177,9 +319,6 @@ function openRow(
   return row;
 }
 
-/**
- * Row의 bottom에 화물을 추가한다. 사이즈/중량 제약이 통과한 상태에서 호출됨.
- */
 function placeBottom(
   row: RowState,
   c: ContainerState,
@@ -201,24 +340,17 @@ function placeBottom(
   row.bottomItems.push(placed);
   row.xCursor += eff.width;
   if (eff.height > row.bottomMaxHeight) row.bottomMaxHeight = eff.height;
-  // 길이방향이 더 긴 화물이 들어오면 row의 yEnd 확장
   const newYEnd = row.yStart + Math.max(row.yEnd - row.yStart, eff.length);
   if (newYEnd > c.spec.innerLength) {
-    // 컨테이너를 벗어나면 호출자가 미리 막아야 함 — 방어적 체크
     throw new Error("행 길이 확장이 컨테이너 길이를 초과");
   }
   row.yEnd = newYEnd;
   c.yCursor = Math.max(c.yCursor, row.yEnd);
   c.totalWeight += item.weight;
+  c.visualCbm += (eff.width * eff.length * eff.height) / 1_000_000;
   return placed;
 }
 
-/**
- * 어떤 bottom 화물 위에 top으로 쌓을 수 있는지 시도.
- * - 동일 bottom 위에는 1개만 (단순화)
- * - heightClearance 검사: bottomMaxHeight + 화물 높이 ≤ 내부 높이
- * - 다단금지/중량조건 검사
- */
 function tryPlaceOnTop(
   row: RowState,
   c: ContainerState,
@@ -227,29 +359,15 @@ function tryPlaceOnTop(
 ): PlacedCargo | null {
   const eff = effectiveSize(item, rotated);
   for (const bottom of row.bottomItems) {
-    // 이미 위에 다른 화물이 있는지
     const occupied = row.topItems.some(
       (t) =>
         t.position.x === bottom.position.x && t.position.y === bottom.position.y,
     );
     if (occupied) continue;
-
-    // 폭/길이가 bottom보다 크면 안정성 문제 — 단순화: bottom 사이즈 이하만 허용
-    if (eff.width > bottom.size.width || eff.length > bottom.size.length) {
-      continue;
-    }
-
-    // 다단/중량 검사
-    const bottomLike = {
-      weightPerUnit: bottom.weight,
-      remarks: bottom.remarks,
-    };
+    if (eff.width > bottom.size.width || eff.length > bottom.size.length) continue;
+    const bottomLike = { weightPerUnit: bottom.weight, remarks: bottom.remarks };
     if (!canStackOn(asCargoLike(item), bottomLike)) continue;
-
-    // 높이 검사 — 내부 높이 초과 금지
     if (bottom.size.height + eff.height > c.spec.innerHeight) continue;
-
-    // 중량 한도 검사
     if (!withinWeightLimit(c.totalWeight, item.weight, c.spec)) continue;
 
     const placed: PlacedCargo = {
@@ -266,15 +384,12 @@ function tryPlaceOnTop(
     row.topItems.push(placed);
     if (eff.height > row.topMaxHeight) row.topMaxHeight = eff.height;
     c.totalWeight += item.weight;
+    c.visualCbm += (eff.width * eff.length * eff.height) / 1_000_000;
     return placed;
   }
   return null;
 }
 
-/**
- * 단일 화물을 컨테이너에 배치 시도. 성공하면 PlacedCargo, 실패면 null.
- * 시도 순서: 기존 행에 폭 추가 → 새 행 개설.
- */
 function tryPlaceInContainer(
   c: ContainerState,
   item: UnitItem,
@@ -282,16 +397,15 @@ function tryPlaceInContainer(
   const rotated = pickRotation(item, c.spec);
   if (rotated === null) return null;
   if (!withinWeightLimit(c.totalWeight, item.weight, c.spec)) return null;
-
   const eff = effectiveSize(item, rotated);
+  // CBM 한도 체크 — 이미 적재된 visual + ct + completed 합이 컨테이너 maxCbm 을 넘지 않게
+  const itemCbm = (eff.width * eff.length * eff.height) / 1_000_000;
+  if (itemCbm > remainingCbm(c)) return null;
 
-  // 1) 기존 행 중 폭이 남은 행에 추가
   for (const row of c.rows) {
     const remainingWidth = c.spec.innerWidth - row.xCursor;
     if (eff.width > remainingWidth) continue;
-    // 행의 길이 제약 — 새 화물이 행보다 길면 yEnd 확장이 필요
     const projectedYEnd = row.yStart + Math.max(row.yEnd - row.yStart, eff.length);
-    // 다음 행과 충돌 방지 (행을 확장해도 다음 행 yStart 침범 금지)
     const nextRowStart = c.rows
       .filter((r) => r.yStart > row.yStart)
       .reduce<number>(
@@ -302,132 +416,74 @@ function tryPlaceInContainer(
     return placeBottom(row, c, item, rotated);
   }
 
-  // 2) 새 행 개설
   const newRow = openRow(c, eff.length);
   if (!newRow) return null;
-  if (eff.width > c.spec.innerWidth) {
-    // 방어적 — 폭이 안 맞으면 행에 못 둠
-    return null;
-  }
+  if (eff.width > c.spec.innerWidth) return null;
   return placeBottom(newRow, c, item, rotated);
 }
 
 /**
- * 컨테이너 후보들에 일반 큐 → topOnly 큐를 차례로 배치한다.
- * 미배치 아이템은 unplaced로 반환.
+ * 입고완료 그룹을 한 컨테이너에 몰아넣을 위치 결정.
+ * 들어가는 가장 작은(maxCbm 적은) 컨테이너 우선. 없으면 가장 큰 것.
  */
-function packIntoContainers(
+function pickCompletedContainer(
   containers: ContainerState[],
-  mainQueue: UnitItem[],
-  topOnlyQueue: UnitItem[],
-): { unplaced: UnitItem[] } {
-  const unplaced: UnitItem[] = [];
-
-  // 메인 큐: 각 화물을 첫 번째로 들어가는 컨테이너에 배치
-  for (const item of mainQueue) {
-    let placed = false;
-    for (const c of containers) {
-      const result = tryPlaceInContainer(c, item);
-      if (result) {
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) unplaced.push(item);
+  completedCbm: number,
+): ContainerState | null {
+  if (completedCbm <= 0) return null;
+  const sorted = [...containers].sort(
+    (a, b) => getContainerCbm(a.spec) - getContainerCbm(b.spec),
+  );
+  for (const c of sorted) {
+    if (completedCbm <= getContainerCbm(c.spec)) return c;
   }
-
-  // topOnly 큐: 기존 row의 빈 top 슬롯을 찾아 배치
-  for (const item of topOnlyQueue) {
-    let placed = false;
-    for (const c of containers) {
-      const rotated = pickRotation(item, c.spec);
-      if (rotated === null) continue;
-      for (const row of c.rows) {
-        const result = tryPlaceOnTop(row, c, item, rotated);
-        if (result) {
-          placed = true;
-          break;
-        }
-      }
-      if (placed) break;
-    }
-    if (!placed) unplaced.push(item);
-  }
-
-  return { unplaced };
+  // 단일 컨테이너에 안 들어가면 가장 큰 컨테이너에 몰음 (잔여는 unplaced 가 아닌, 그냥 over-fill 표시)
+  return sorted[sorted.length - 1] ?? null;
 }
 
 /**
- * 컨테이너 조합 후보 생성.
- * - auto: 부피 기준 컨테이너 수 추정 + 약간의 여유분
- * - 20ft_only / 40ft_only: 해당 타입만 사용, 부피/중량 기준으로 개수 결정
+ * 사용자가 명시한 컨테이너에 입고완료 채우기 (한도까지). 잔여 분은 다른 컨테이너로 분산.
+ * @returns warnings 메시지 배열
  */
-function candidateCombinations(
-  cargoes: CargoSpec[],
-  mode: ContainerMode,
-): ContainerType[][] {
-  const totalCbm = cargoes.reduce(
-    (s, c) => s + (c.cbm ?? (c.width * c.length * c.height * c.quantity) / 1_000_000),
-    0,
-  );
-  const totalWeight = cargoes.reduce(
-    (s, c) => s + c.weightPerUnit * c.quantity,
-    0,
-  );
-
-  const cbm20 = getContainerCbm(CONTAINERS["20FT"]);
-  const cbm40 = getContainerCbm(CONTAINERS["40FT"]);
-  const max20 = CONTAINERS["20FT"].maxWeightKg;
-  const max40 = CONTAINERS["40FT"].maxWeightKg;
-
-  if (mode === "20ft_only") {
-    // 부피와 중량 둘 다 충족하도록 max
-    const byCbm = Math.ceil(totalCbm / cbm20);
-    const byWeight = Math.ceil((totalWeight + 1) / max20);
-    const count = Math.max(1, byCbm, byWeight);
-    return [Array.from({ length: count }, () => "20FT" as ContainerType)];
+function distributeCompletedToTarget(
+  containers: ContainerState[],
+  completedCbm: number,
+  targetIndex: number,
+): string[] {
+  const warnings: string[] = [];
+  if (completedCbm <= 0) return warnings;
+  const target = containers.find((c) => c.index === targetIndex);
+  if (!target) return warnings;
+  const cap = getContainerCbm(target.spec);
+  const fill = Math.min(completedCbm, cap);
+  target.completedCbm = fill;
+  let overflow = completedCbm - fill;
+  if (overflow > 0) {
+    // 다른 컨테이너로 분산 — 들어가는 가장 작은 것 우선
+    const others = containers
+      .filter((c) => c.index !== targetIndex)
+      .sort((a, b) => getContainerCbm(a.spec) - getContainerCbm(b.spec));
+    for (const c of others) {
+      if (overflow <= 0) break;
+      const free = getContainerCbm(c.spec) - c.completedCbm;
+      const give = Math.min(overflow, free);
+      if (give > 0) {
+        c.completedCbm += give;
+        overflow -= give;
+      }
+    }
+    const moved = completedCbm - fill - overflow;
+    warnings.push(
+      `컨테이너 ${target.index} (${target.spec.type}, 한도 ${cap}m³) 에 입고완료 ${completedCbm.toFixed(3)}m³ 중 ${fill.toFixed(3)}m³ 적재. 나머지 ${moved.toFixed(3)}m³ 는 다른 컨테이너로 자동 분산${overflow > 0 ? `, ${overflow.toFixed(3)}m³ 는 어디에도 들어가지 못함 (over-fill)` : ""}`,
+    );
+    if (overflow > 0) {
+      // 그래도 못 들어가면 target 에 강제 over-fill
+      target.completedCbm += overflow;
+    }
   }
-  if (mode === "40ft_only") {
-    const byCbm = Math.ceil(totalCbm / cbm40);
-    const byWeight = Math.ceil((totalWeight + 1) / max40);
-    const count = Math.max(1, byCbm, byWeight);
-    return [Array.from({ length: count }, () => "40FT" as ContainerType)];
-  }
-
-  // auto — 40FT 우선, 부족분만 20FT로
-  const candidates: ContainerType[][] = [];
-  const count40Base = Math.max(0, Math.floor(totalCbm / cbm40));
-  // 후보 1: 40FT만 (올림)
-  const only40Count = Math.max(
-    1,
-    Math.ceil(totalCbm / cbm40),
-    Math.ceil((totalWeight + 1) / max40),
-  );
-  candidates.push(
-    Array.from({ length: only40Count }, () => "40FT" as ContainerType),
-  );
-  // 후보 2: 40FT count40Base + 20FT 1개
-  if (count40Base > 0) {
-    candidates.push([
-      ...Array.from({ length: count40Base }, () => "40FT" as ContainerType),
-      "20FT",
-    ]);
-  }
-  // 후보 3: 20FT만 (올림)
-  const only20Count = Math.max(
-    1,
-    Math.ceil(totalCbm / cbm20),
-    Math.ceil((totalWeight + 1) / max20),
-  );
-  candidates.push(
-    Array.from({ length: only20Count }, () => "20FT" as ContainerType),
-  );
-  return candidates;
+  return warnings;
 }
 
-/**
- * RowState를 외부에 보여줄 Row로 변환하면서 천장 여유/입구 통과 가능성 계산.
- */
 function finalizeRow(row: RowState, spec: ContainerSpec): Row {
   const totalHeight = row.bottomMaxHeight + row.topMaxHeight;
   const topClearance = spec.innerHeight - totalHeight;
@@ -445,18 +501,19 @@ function finalizeRow(row: RowState, spec: ContainerSpec): Row {
   };
 }
 
-/** 한 컨테이너의 적재 상태를 결과 형태로 정리 */
 function finalizeContainer(c: ContainerState): ContainerPlan {
   const rows = c.rows.map((r) => finalizeRow(r, c.spec));
   const containerCbm = getContainerCbm(c.spec);
-  let usedCbm = 0;
+  let visualCbm = 0;
   for (const r of rows) {
     for (const item of [...r.bottomItems, ...r.topItems]) {
-      usedCbm +=
+      visualCbm +=
         (item.size.width * item.size.length * item.size.height) / 1_000_000;
     }
   }
-  const cbmFillRate = containerCbm > 0 ? (usedCbm / containerCbm) * 100 : 0;
+  const totalLoadedCbm = visualCbm + c.ctCbm + c.completedCbm;
+  const cbmFillRate =
+    containerCbm > 0 ? (totalLoadedCbm / containerCbm) * 100 : 0;
   const weightFillRate =
     c.spec.maxWeightKg > 0 ? (c.totalWeight / c.spec.maxWeightKg) * 100 : 0;
   return {
@@ -464,87 +521,198 @@ function finalizeContainer(c: ContainerState): ContainerPlan {
     spec: c.spec,
     rows,
     totalWeight: c.totalWeight,
-    totalCbm: usedCbm,
+    totalCbm: visualCbm,
+    ctCbm: c.ctCbm,
+    completedCbm: c.completedCbm,
     cbmFillRate,
     weightFillRate,
   };
 }
 
 /**
- * 메인 진입점.
- * 컨테이너 조합 후보를 차례로 시도하여 unplaced가 가장 적고 충전률이 높은 결과를 채택한다.
+ * 패킹 옵션 — 사용자가 적재 계획 상세 화면에서 특정 컨테이너 1대를
+ * "입고완료 전용으로 채우기" 미리보기 할 때 사용.
  */
-export function pack(cargoes: CargoSpec[], mode: ContainerMode): CLPResult {
-  const items = expand(cargoes);
-  const topOnly = items.filter((i) => i.remarks.topOnly);
-  const main = sortMainQueue(items.filter((i) => !i.remarks.topOnly));
+export interface PackOptions {
+  /** 1-based 컨테이너 인덱스. 이 컨에 입고완료를 우선 몰음 */
+  completedExclusiveContainerIndex?: number;
+  /** 위 컨테이너 여유 CBM 에 미입고 시각 화물 허용 (기본 false → 단독) */
+  allowVisualInExclusive?: boolean;
+  /** 위 컨테이너 여유 CBM 에 CT 카톤 허용 (기본 false) */
+  allowCtInExclusive?: boolean;
+}
 
-  const combinations = candidateCombinations(cargoes, mode);
+/**
+ * 메인 진입점.
+ * 점수 없이 결정적 룰로 한 번에 패킹.
+ */
+export function pack(
+  cargoes: CargoSpec[],
+  mode: ContainerMode,
+  options?: PackOptions,
+): CLPResult {
+  // 1) 분류
+  const { visualCargoes, ctCargoes, completedCargoes } = classify(cargoes);
 
-  let best: { plan: CLPResult; score: number } | null = null;
+  // 2) CBM/무게 합 (3그룹 모두 합)
+  const visualCbm = visualCargoes.reduce((s, c) => s + cargoCbm(c), 0);
+  const ctCbm = ctCargoes.reduce(
+    (s, c) => s + (c.cbm ?? c.aboutCbm ?? cargoCbm(c)),
+    0,
+  );
+  const completedCbm = completedCargoes.reduce((s, c) => s + (c.cbm ?? 0), 0);
+  const totalCbm = visualCbm + ctCbm + completedCbm;
 
-  for (const combo of combinations) {
-    const containers: ContainerState[] = combo.map((type, idx) =>
-      makeContainer(idx + 1, getContainerSpec(type)),
-    );
-    const { unplaced } = packIntoContainers(containers, main, topOnly);
+  // 3) 컨테이너 결정
+  const types = decideContainers(totalCbm, completedCbm, mode);
+  const containers: ContainerState[] = types.map((t, i) =>
+    makeContainer(i + 1, getContainerSpec(t)),
+  );
 
-    const plans = containers.map(finalizeContainer);
-    const count20FT = plans.filter((p) => p.spec.type === "20FT").length;
-    const count40FT = plans.filter((p) => p.spec.type === "40FT").length;
-    const totalWeight = plans.reduce((s, p) => s + p.totalWeight, 0);
-    const totalCbm = plans.reduce((s, p) => s + p.totalCbm, 0);
-    const avgFillRate =
-      plans.length > 0
-        ? plans.reduce((s, p) => s + p.cbmFillRate, 0) / plans.length
-        : 0;
-
-    const result: CLPResult = {
-      containers: plans,
-      unplaced: unplaced.map((u) => ({
-        cargoId: u.cargoId,
-        reason: "컨테이너에 배치할 공간/중량 여유가 없음",
-      })),
-      summary: {
-        count20FT,
-        count40FT,
-        totalWeight,
-        totalCbm,
-        avgFillRate,
-      },
-    };
-
-    // 점수: 미배치 페널티가 가장 크고, 그 다음 충전률, 그 다음 컨테이너 수(적을수록 좋음)
-    const score =
-      -unplaced.length * 10000 + avgFillRate - plans.length * 0.5;
-
-    if (!best || score > best.score) {
-      best = { plan: result, score };
+  // 4) 입고완료 그룹 → 단일 컨테이너에 합산
+  //   옵션이 있으면 사용자가 지정한 컨테이너에 한도까지 우선 적재 + 초과분 자동 분산
+  const warnings: string[] = [];
+  const exclusiveIdx = options?.completedExclusiveContainerIndex;
+  if (completedCbm > 0) {
+    if (typeof exclusiveIdx === "number" && containers.some((c) => c.index === exclusiveIdx)) {
+      warnings.push(...distributeCompletedToTarget(containers, completedCbm, exclusiveIdx));
+    } else {
+      const target = pickCompletedContainer(containers, completedCbm);
+      if (target) target.completedCbm = completedCbm;
     }
   }
 
-  if (!best) {
-    // 빈 화물 등으로 후보가 없는 경우 — 빈 결과 반환
-    return {
-      containers: [],
-      unplaced: [],
-      summary: {
-        count20FT: 0,
-        count40FT: 0,
-        totalWeight: 0,
-        totalCbm: 0,
-        avgFillRate: 0,
-      },
-    };
+  // 5) 시각 적재: topOnly → 일반화물 입력 순서로
+  const allUnits = expandToUnits(visualCargoes);
+  const topOnlyUnits = allUnits.filter((u) => u.remarks.topOnly);
+  const generalUnits = allUnits.filter((u) => !u.remarks.topOnly);
+
+  // 시각 적재 가능 컨테이너 결정 — 옵션상 exclusive 컨에 시각 차단되면 그 컨 제외
+  const visualContainers = containers.filter((c) => {
+    if (
+      typeof exclusiveIdx === "number" &&
+      c.index === exclusiveIdx &&
+      options?.allowVisualInExclusive !== true
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  const unplaced: UnitItem[] = [];
+
+  // 일반 (bottom 후보) 먼저 입력 순서로 — 시각 가능한 컨테이너만 시도
+  for (const u of generalUnits) {
+    let placed = false;
+    for (const c of visualContainers) {
+      if (tryPlaceInContainer(c, u)) {
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) unplaced.push(u);
   }
-  return best.plan;
+
+  // topOnly — 빈 top 슬롯에 (시각 가능한 컨테이너만 시도)
+  for (const u of topOnlyUnits) {
+    let placed = false;
+    for (const c of visualContainers) {
+      const rotated = pickRotation(u, c.spec);
+      if (rotated === null) continue;
+      for (const row of c.rows) {
+        if (tryPlaceOnTop(row, c, u, rotated)) {
+          placed = true;
+          break;
+        }
+      }
+      if (placed) break;
+    }
+    if (!placed) unplaced.push(u);
+  }
+
+  // 6) CT 화물 CBM → 컨테이너별 남은 여유 CBM 에 합산
+  //    옵션상 exclusive 컨에 CT 차단이면 해당 컨테이너 건너뜀
+  let remainingCt = ctCbm;
+  if (remainingCt > 0) {
+    const ctTargets = containers.filter((c) => {
+      if (
+        typeof exclusiveIdx === "number" &&
+        c.index === exclusiveIdx &&
+        options?.allowCtInExclusive !== true
+      ) {
+        return false;
+      }
+      return true;
+    });
+    for (const c of ctTargets) {
+      if (remainingCt <= 0) break;
+      const used = computeContainerLoadedCbm(c);
+      const free = Math.max(0, getContainerCbm(c.spec) - used);
+      const fill = Math.min(remainingCt, free);
+      c.ctCbm += fill;
+      remainingCt -= fill;
+    }
+  }
+
+  // 7) 결과 정리
+  const plans = containers.map(finalizeContainer);
+  const count20FT = plans.filter((p) => p.spec.type === "20FT").length;
+  const count40FT = plans.filter((p) => p.spec.type === "40FT").length;
+  const totalWeight = plans.reduce((s, p) => s + p.totalWeight, 0);
+  const visualPlanCbm = plans.reduce((s, p) => s + p.totalCbm, 0);
+  const ctTotalCbm = plans.reduce((s, p) => s + p.ctCbm, 0);
+  const completedTotalCbm = plans.reduce((s, p) => s + p.completedCbm, 0);
+  const avgFillRate =
+    plans.length > 0
+      ? plans.reduce((s, p) => s + p.cbmFillRate, 0) / plans.length
+      : 0;
+
+  const unplacedOut = unplaced.map((u) => ({
+    cargoId: u.cargoId,
+    reason: "컨테이너에 배치할 공간/중량 여유가 없음",
+  }));
+  // CT 가 모두 안 들어간 부분도 표시
+  if (remainingCt > 0) {
+    unplacedOut.push({
+      cargoId: "(CT 잔여)",
+      reason: `카톤 화물 ${remainingCt.toFixed(3)} m³ 분이 컨테이너 여유 CBM 에 들어가지 않음`,
+    });
+  }
+
+  return {
+    containers: plans,
+    unplaced: unplacedOut,
+    summary: {
+      count20FT,
+      count40FT,
+      totalWeight,
+      totalCbm: visualPlanCbm,
+      ctTotalCbm,
+      completedTotalCbm,
+      avgFillRate,
+      warnings,
+    },
+  };
+}
+
+/** 컨테이너에 이미 적재된 모든 CBM (시각 unit + ct + completed) 합 */
+function computeContainerLoadedCbm(c: ContainerState): number {
+  let visual = 0;
+  for (const r of c.rows) {
+    for (const item of [...r.bottomItems, ...r.topItems]) {
+      visual += (item.size.width * item.size.length * item.size.height) / 1_000_000;
+    }
+  }
+  return visual + c.ctCbm + c.completedCbm;
 }
 
 // 테스트에서 내부 함수를 검증할 수 있도록 명시적으로 노출
 export const __testables = {
-  expand,
-  sortMainQueue,
-  pickRotation,
-  candidateCombinations,
+  expandToUnits,
+  classify,
+  decideContainers,
+  pickCompletedContainer,
+  cargoCbm,
+  cargoTotalWeight,
   DEFAULT_REMARK,
 };

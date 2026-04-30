@@ -36,8 +36,12 @@ export interface ContainerPlan {
   spec: ContainerSpec;
   rows: Row[];
   totalWeight: number;           // kg
-  totalCbm: number;
-  cbmFillRate: number;           // %
+  totalCbm: number;              // 시각 unit 만 합산
+  /** 카톤(CT) 화물 CBM — 시각화 X, 컨테이너 여유 CBM 에 합산만 */
+  ctCbm: number;
+  /** 입고완료(CFS CBM 입력) 화물 CBM — 시각화 X, 별도 합산 */
+  completedCbm: number;
+  cbmFillRate: number;           // % — (시각 + ct + completed) / maxCbm × 100
   weightFillRate: number;        // %
 }
 
@@ -51,6 +55,12 @@ export interface CLPResult {
     count40FT: number;
     totalWeight: number;
     totalCbm: number;
+    /** 카톤(CT) 화물 총 CBM (시각화 X, 합산용) */
+    ctTotalCbm: number;
+    /** 입고완료(CFS CBM) 화물 총 CBM (시각화 X) */
+    completedTotalCbm: number;
     avgFillRate: number;
+    /** 사용자에게 표시할 경고/안내 메시지 (한도 초과 분산 등) */
+    warnings: string[];
   };
 }

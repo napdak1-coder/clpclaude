@@ -24,7 +24,7 @@ export default async function SharedPlanPage({ params }: PageProps) {
   return (
     <main className="mx-auto max-w-7xl space-y-4 p-4 sm:p-8">
       <header>
-        <h1 className="text-xl font-bold">CLPNICE — 공유된 적재 계획</h1>
+        <h1 className="text-xl font-bold">clp노블코코 — 공유</h1>
         <p className="mt-1 text-xs text-neutral-500">
           이 화면은 읽기 전용입니다. 계산 시각:{" "}
           {new Date(plan.createdAt).toLocaleString("ko-KR")}
@@ -32,6 +32,8 @@ export default async function SharedPlanPage({ params }: PageProps) {
       </header>
       <PlanView
         planId={plan.id}
+        shipmentId={plan.shipmentId}
+        containerMode={plan.containerMode}
         result={plan.result}
         shareToken={plan.shareToken}
         readOnly

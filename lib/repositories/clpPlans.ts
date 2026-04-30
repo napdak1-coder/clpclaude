@@ -93,7 +93,11 @@ function rowToRecord(row: Record<string, unknown>): CLPPlanRecord {
   };
 }
 
-/** 1) 저장 — result 전체를 JSON 직렬화 */
+/**
+ * 1) 저장 — 헤더(clp_plans)에 result_json 스냅샷 + 정규화 테이블
+ *    (plan_containers / plan_rows / plan_placements / plan_unplaced) 을 함께 채운다.
+ *    배치(트랜잭션)로 처리하여 부분 저장이 발생하지 않도록 한다.
+ */
 export async function savePlan(
   shipmentId: string,
   mode: ContainerMode,
@@ -101,7 +105,10 @@ export async function savePlan(
 ): Promise<CLPPlanRecord> {
   const id = crypto.randomUUID();
 
-  await db.execute({
+  const stmts: { sql: string; args: unknown[] }[] = [];
+
+  // 헤더 — 요약 컬럼 + result_json 스냅샷
+  stmts.push({
     sql: `
       INSERT INTO clp_plans (
         id, shipment_id, container_mode,
@@ -124,12 +131,115 @@ export async function savePlan(
     ],
   });
 
-  // shipment status를 calculated 로 갱신 — 재계산 흔적이 남도록
-  await db.execute({
+  // 정규화: 컨테이너 → 행 → 배치 unit
+  for (const container of result.containers) {
+    const containerId = crypto.randomUUID();
+    stmts.push({
+      sql: `
+        INSERT INTO plan_containers (
+          id, plan_id, container_index, container_type,
+          inner_length_cm, inner_width_cm, inner_height_cm,
+          door_height_cm, max_weight_kg,
+          total_weight_kg, total_cbm, cbm_fill_rate, weight_fill_rate
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      args: [
+        containerId,
+        id,
+        container.index,
+        container.spec.type,
+        container.spec.innerLength,
+        container.spec.innerWidth,
+        container.spec.innerHeight,
+        container.spec.doorHeight,
+        container.spec.maxWeightKg,
+        container.totalWeight,
+        container.totalCbm,
+        container.cbmFillRate,
+        container.weightFillRate,
+      ],
+    });
+
+    for (const row of container.rows) {
+      const rowId = crypto.randomUUID();
+      stmts.push({
+        sql: `
+          INSERT INTO plan_rows (
+            id, plan_container_id, row_index,
+            y_start_cm, y_end_cm,
+            bottom_max_height, top_max_height,
+            top_clearance, door_passable
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        args: [
+          rowId,
+          containerId,
+          row.index,
+          row.yStart,
+          row.yEnd,
+          row.bottomMaxHeight,
+          row.topMaxHeight,
+          row.topClearance,
+          row.doorPassable ? 1 : 0,
+        ],
+      });
+
+      const placements = [...row.bottomItems, ...row.topItems];
+      for (const p of placements) {
+        stmts.push({
+          sql: `
+            INSERT INTO plan_placements (
+              id, plan_row_id, cargo_id, shipper, item_name,
+              layer, pos_x_cm, pos_y_cm,
+              width_cm, length_cm, height_cm,
+              rotated, weight_kg,
+              no_stacking, top_only, orientation, heavier_below
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          args: [
+            crypto.randomUUID(),
+            rowId,
+            p.cargoId,
+            p.shipper ?? null,
+            p.name ?? null,
+            p.layer,
+            p.position.x,
+            p.position.y,
+            p.size.width,
+            p.size.length,
+            p.size.height,
+            p.rotated ? 1 : 0,
+            p.weight,
+            p.remarks.noStacking ? 1 : 0,
+            p.remarks.topOnly ? 1 : 0,
+            p.remarks.orientation,
+            p.remarks.heavierBelow ? 1 : 0,
+          ],
+        });
+      }
+    }
+  }
+
+  // 미배치 unit
+  for (const u of result.unplaced) {
+    stmts.push({
+      sql: `
+        INSERT INTO plan_unplaced (id, plan_id, cargo_id, reason)
+        VALUES (?, ?, ?, ?)
+      `,
+      args: [crypto.randomUUID(), id, u.cargoId, u.reason ?? null],
+    });
+  }
+
+  // shipment status 'draft' → 'calculated'
+  stmts.push({
     sql:
       "UPDATE shipments SET status = 'calculated' WHERE id = ? AND status = 'draft'",
     args: [shipmentId],
   });
+
+  // 트랜잭션 일괄 처리 — 일부만 들어가는 상황 차단
+  await db.batch(stmts, "write");
 
   const fetched = await db.execute({
     sql: "SELECT * FROM clp_plans WHERE id = ? LIMIT 1",

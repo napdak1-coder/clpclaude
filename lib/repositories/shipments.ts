@@ -7,7 +7,60 @@
  */
 
 import { db } from "../db.ts";
-import type { CargoSpec, Orientation } from "../../types/cargo.ts";
+import {
+  normalizeCargoType,
+  type CargoSpec,
+  type CargoType,
+  type Orientation,
+  type UnitSize,
+} from "../../types/cargo.ts";
+
+/** unit_sizes_json TEXT → UnitSize[] (이상치는 조용히 폐기) */
+function parseUnitSizes(raw: unknown): UnitSize[] | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const txt = typeof raw === "string" ? raw : String(raw);
+  if (!txt) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(txt);
+    if (!Array.isArray(parsed)) return undefined;
+    const cleaned: UnitSize[] = [];
+    for (const v of parsed) {
+      if (!v || typeof v !== "object") continue;
+      const o = v as Record<string, unknown>;
+      const w = Number(o.width);
+      const l = Number(o.length);
+      const h = Number(o.height);
+      const q = Number(o.quantity);
+      const wt = Number(o.weight);
+      if (!Number.isFinite(w) || !Number.isFinite(l) || !Number.isFinite(h) || !Number.isFinite(q)) continue;
+      if (w <= 0 || l <= 0 || h <= 0 || q <= 0) continue;
+      cleaned.push({
+        width: w,
+        length: l,
+        height: h,
+        quantity: q,
+        weight: Number.isFinite(wt) && wt >= 0 ? wt : 0,
+      });
+    }
+    return cleaned.length > 0 ? cleaned : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function serializeUnitSizes(arr: UnitSize[] | undefined | null): string | null {
+  if (!arr || arr.length === 0) return null;
+  const cleaned = arr
+    .filter((u) => u.width > 0 && u.length > 0 && u.height > 0 && u.quantity > 0)
+    .map((u) => ({
+      width: u.width,
+      length: u.length,
+      height: u.height,
+      quantity: u.quantity,
+      weight: typeof u.weight === "number" && u.weight >= 0 ? u.weight : 0,
+    }));
+  return cleaned.length > 0 ? JSON.stringify(cleaned) : null;
+}
 
 /** shipments 테이블 + 합산값 (목록용) */
 export interface ShipmentSummary {
@@ -57,6 +110,7 @@ export interface ShipmentInput {
 
 export interface CargoItemInput {
   id?: string;                 // 미지정 시 자동 발급
+  cargoType?: CargoType | null;
   sortOrder?: number;
   itemName?: string | null;
   /** 화물 라인별 실화주 (콘솔 — 부킹 단위와 다른 화주 다중 보존) */
@@ -69,6 +123,10 @@ export interface CargoItemInput {
   quantity: number;
   weightPerUnitKg: number;
   cbm?: number | null;
+  /** 엑셀 ABOUT 셀 값 — CFS CBM 과 별도 보존 (about_cbm 컬럼) */
+  aboutCbm?: number | null;
+  /** 단위별 사이즈 그룹 — 있으면 unit_sizes_json TEXT 컬럼으로 직렬화 저장 */
+  unitSizes?: UnitSize[] | null;
   noStacking?: boolean;
   topOnly?: boolean;
   orientation?: Orientation;
@@ -140,6 +198,7 @@ function rowToCargo(row: Record<string, unknown>): CargoSpec {
     id: toString(row.id),
     shipmentId: toString(row.shipment_id),
     sortOrder: toNumber(row.sort_order),
+    cargoType: normalizeCargoType(row.cargo_type),
     itemName: toStringOrNull(row.item_name) ?? undefined,
     actualShipperName: toStringOrNull(row.actual_shipper_name) ?? undefined,
     shipperName: toStringOrNull(row.shipper_name) ?? undefined,
@@ -149,6 +208,8 @@ function rowToCargo(row: Record<string, unknown>): CargoSpec {
     quantity: toNumber(row.quantity),
     weightPerUnit: toNumber(row.weight_per_unit_kg),
     cbm: toNullableNumber(row.cbm) ?? undefined,
+    aboutCbm: toNullableNumber(row.about_cbm) ?? undefined,
+    unitSizes: parseUnitSizes(row.unit_sizes_json),
     remarks: {
       noStacking: toBoolean(row.no_stacking),
       topOnly: toBoolean(row.top_only),
@@ -202,8 +263,9 @@ export async function createShipment(
           id, shipment_id, sort_order, item_name,
           actual_shipper_name, shipper_name,
           width_cm, length_cm, height_cm, quantity, weight_per_unit_kg, cbm,
-          no_stacking, top_only, orientation, heavier_below, item_remark
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          no_stacking, top_only, orientation, heavier_below, item_remark,
+          unit_sizes_json, about_cbm, cargo_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         itemId,
@@ -223,6 +285,9 @@ export async function createShipment(
         item.orientation ?? "free",
         item.heavierBelow ? 1 : 0,
         item.itemRemark ?? null,
+        serializeUnitSizes(item.unitSizes ?? null),
+        item.aboutCbm ?? null,
+        normalizeCargoType(item.cargoType ?? null),
       ],
     };
   });
@@ -281,8 +346,9 @@ export async function updateShipment(
           id, shipment_id, sort_order, item_name,
           actual_shipper_name, shipper_name,
           width_cm, length_cm, height_cm, quantity, weight_per_unit_kg, cbm,
-          no_stacking, top_only, orientation, heavier_below, item_remark
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          no_stacking, top_only, orientation, heavier_below, item_remark,
+          unit_sizes_json, about_cbm, cargo_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         itemId,
@@ -302,6 +368,9 @@ export async function updateShipment(
         item.orientation ?? "free",
         item.heavierBelow ? 1 : 0,
         item.itemRemark ?? null,
+        serializeUnitSizes(item.unitSizes ?? null),
+        item.aboutCbm ?? null,
+        normalizeCargoType(item.cargoType ?? null),
       ],
     };
   });

@@ -47,6 +47,8 @@ export default async function PlanDetailPage({ params }: PageProps) {
       </header>
       <PlanView
         planId={plan.id}
+        shipmentId={id}
+        containerMode={plan.containerMode}
         result={plan.result}
         shareToken={plan.shareToken}
         fileLabel={fileLabel}

@@ -142,7 +142,7 @@ export default function ShipmentDetailPage({
 
   if (!detail) {
     return (
-      <main className="mx-auto max-w-7xl p-4 sm:p-8">
+      <main className="mx-auto w-full p-3 sm:p-6">
         {error ? (
           <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
@@ -155,29 +155,19 @@ export default function ShipmentDetailPage({
   }
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-8">
-      <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold">
-            부킹 상세 — {detail.houseBlNo ?? "(House B/L 미정)"}
-          </h1>
-          <p className="text-xs text-neutral-500">
-            ID: {detail.id} · 상태 {detail.status}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {savedToast && (
-            <span className="rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-800">
-              {savedToast}
-            </span>
-          )}
-          <Link
-            href="/"
-            className="text-sm text-neutral-500 underline hover:text-neutral-700"
-          >
-            ← 목록으로
-          </Link>
-        </div>
+    <main className="mx-auto w-full space-y-6 p-3 sm:p-6">
+      <header className="flex justify-end gap-2">
+        {savedToast && (
+          <span className="rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-800">
+            {savedToast}
+          </span>
+        )}
+        <Link
+          href="/"
+          className="text-sm text-neutral-500 underline hover:text-neutral-700"
+        >
+          ← 목록으로
+        </Link>
       </header>
 
       <ShipmentForm

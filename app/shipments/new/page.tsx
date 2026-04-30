@@ -37,7 +37,7 @@ export default function NewShipmentPage() {
   };
 
   return (
-    <main className="mx-auto max-w-7xl p-4 sm:p-8">
+    <main className="mx-auto w-full p-3 sm:p-6">
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-bold">새 부킹 작성</h1>
         <Link

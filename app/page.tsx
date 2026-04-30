@@ -16,7 +16,7 @@ export default function HomePage() {
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
-            CLPNICE — 컨테이너 적재 계획
+            clp노블코코
           </h1>
           <p className="mt-1 text-sm text-neutral-500">
             수출 콘솔 화물 합적 — 부킹 단위로 화물을 입력하고 자동으로 적재 계획을 만듭니다.

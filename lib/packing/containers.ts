@@ -11,6 +11,7 @@ export const CONTAINERS: Record<ContainerType, ContainerSpec> = {
   "20FT": {
     type: "20FT",
     maxWeightKg: 21000,
+    maxCbm: 28,
     innerLength: 590,
     innerWidth: 234,
     doorHeight: 228,
@@ -19,6 +20,7 @@ export const CONTAINERS: Record<ContainerType, ContainerSpec> = {
   "40FT": {
     type: "40FT",
     maxWeightKg: 25000,
+    maxCbm: 60,
     innerLength: 1200,
     innerWidth: 234,
     doorHeight: 258,
@@ -39,9 +41,9 @@ export function getContainerSpec(type: ContainerType): ContainerSpec {
 }
 
 /**
- * 컨테이너 내부 부피(CBM) 계산.
- * 충전률 산정 등에서 자주 쓰이므로 헬퍼로 노출한다.
+ * 컨테이너 운영상 최대 부피(m³) — 컨테이너 수 산정 / 충전률 기준값.
+ * 이론적인 내부 치수 부피가 아닌 사용자가 정한 maxCbm 을 반환한다.
  */
 export function getContainerCbm(spec: ContainerSpec): number {
-  return (spec.innerLength * spec.innerWidth * spec.innerHeight) / 1_000_000;
+  return spec.maxCbm;
 }

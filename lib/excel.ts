@@ -15,6 +15,7 @@ export type CargoFieldKey =
   | "itemName"
   | "itemActualShipperName"
   | "itemShipperName"
+  | "cargoType"
   | "widthCm"
   | "lengthCm"
   | "heightCm"
@@ -90,6 +91,7 @@ export const CARGO_FIELDS: CargoFieldKey[] = [
   "itemName",
   "itemActualShipperName",
   "itemShipperName",
+  "cargoType",
   "widthCm",
   "lengthCm",
   "heightCm",
@@ -122,6 +124,7 @@ export const FIELD_LABELS: Record<FieldKey, string> = {
   itemName: "품목명",
   itemActualShipperName: "실화주(화물)",
   itemShipperName: "화주(화물)",
+  cargoType: "구분(PL/WB/CT 등)",
   widthCm: "가로(cm)",
   lengthCm: "세로(cm)",
   heightCm: "높이(cm)",
@@ -170,8 +173,9 @@ export interface DimensionMatch {
 // 형태: W H L / count [/ weightKG]
 const PATTERN_SLASH = /(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\s*(\d+)\s*(?:\/\s*\d+(?:\.\d+)?\s*K?G)?/gi;
 
-// 형태: W [xX×*] H [xX×*] L (optional (count))
-const PATTERN_OP = /(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:\(\s*(\d+)\s*\))?/g;
+// 형태: W [xX×*] H [xX×*] L (optional count: "(N)" 또는 "XN" 또는 "xN")
+//   ex) "80*60*50X2" → count=2,  "118x114x59(6)" → count=6
+const PATTERN_OP = /(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:\(\s*(\d+)\s*\)|[xX]\s*(\d+))?/g;
 
 export function parseDimensionsFromText(s: string | null | undefined): DimensionMatch[] {
   if (!s) return [];
@@ -190,16 +194,94 @@ export function parseDimensionsFromText(s: string | null | undefined): Dimension
   }
   if (out.length > 0) return out;
 
-  // 2) 곱셈 기호(또는 *) 형식
+  // 2) 곱셈 기호(또는 *) 형식 — count 는 "(N)" 또는 "XN" 형식
   const reOp = new RegExp(PATTERN_OP.source, "g");
   while ((m = reOp.exec(s)) !== null) {
+    const count = m[4] ?? m[5];
     out.push({
       width: Number(m[1]),
       length: Number(m[2]),
       height: Number(m[3]),
-      count: m[4] ? Number(m[4]) : undefined,
+      count: count ? Number(count) : undefined,
     });
   }
+  return out;
+}
+
+/**
+ * 사이즈 패턴(`162×107×66`, `180 90 27 / 1 / 190KG` 등) 을 텍스트에서 제거하고 잔여 문자열 반환.
+ * REMARK 텍스트에서 사이즈를 W/L/H로 추출한 뒤 메모 컬럼에 남길 텍스트를 정리할 때 사용.
+ */
+export function stripDimensionsFromText(s: string): string {
+  let out = s;
+  out = out.replace(new RegExp(PATTERN_SLASH.source, "gi"), " ");
+  out = out.replace(new RegExp(PATTERN_OP.source, "g"), " ");
+  return out;
+}
+
+export interface ExtractedFlags {
+  noStacking?: boolean;
+  topOnly?: boolean;
+  heavierBelow?: boolean;
+  /** "free" 는 명시 안 함 — 키가 있을 때만 적용 */
+  orientation?: "long_along_length" | "fixed";
+}
+
+/**
+ * REMARK 텍스트에서 리마크 플래그(다단금지/상단적재/중량조건/장축길이방향/회전금지)를
+ * 추출하고, 해당 키워드를 텍스트에서 제거한 잔여 문자열을 반환.
+ *
+ * 매칭은 한국어 키워드 + `*다단금지*` 처럼 별표로 강조한 변형까지 흡수.
+ */
+export function extractFlagsAndStrip(text: string): {
+  flags: ExtractedFlags;
+  residual: string;
+} {
+  let out = text;
+  const flags: ExtractedFlags = {};
+
+  if (/다단\s*금지/.test(out)) {
+    flags.noStacking = true;
+    out = out.replace(/\*?\s*다단\s*금지\s*\*?/g, " ");
+  }
+  if (/상단\s*적재/.test(out)) {
+    flags.topOnly = true;
+    out = out.replace(/\*?\s*상단\s*적재\s*\*?/g, " ");
+  }
+  if (/중량\s*조건/.test(out)) {
+    flags.heavierBelow = true;
+    out = out.replace(/\*?\s*중량\s*조건\s*\*?/g, " ");
+  }
+  // 장축(길이|방향|길이방향) 제한
+  if (/장축[\s가-힣]{0,8}(?:길이|방향|제한)/.test(out)) {
+    flags.orientation = "long_along_length";
+    out = out.replace(/\*?\s*장축[\s가-힣]{0,8}(?:길이방향제한|길이|방향|제한)\s*\*?/g, " ");
+  }
+  // 회전 금지 / fixed → fixed
+  if (/회전\s*금지/.test(out) || /\bfixed\b/i.test(out)) {
+    flags.orientation = "fixed";
+    out = out.replace(/\*?\s*회전\s*금지\s*\*?/g, " ");
+    out = out.replace(/\bfixed\b/gi, " ");
+  }
+  // 자유 — 기본값이라 토글은 안 건드리지만 텍스트는 제거
+  out = out.replace(/\*?\s*자유\s*\*?/g, " ");
+
+  return { flags, residual: out };
+}
+
+/** 사이즈/플래그 제거 후 남은 문자열 정리 — 구분자/공백 정돈 */
+export function tidyResidualText(s: string): string {
+  const out = s
+    .replace(/[\u2022·•]/g, " ")
+    .replace(/[*]+/g, " ")
+    .replace(/(\s*,\s*)+/g, ", ")
+    .replace(/(\s*\/\s*)+/g, " / ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s/\\\-—|,]+/g, "")
+    .replace(/[\s/\\\-—|,]+$/g, "")
+    .trim();
+  // 영숫자/한글이 하나도 없으면 의미 없는 잔여 — 빈 문자열로
+  if (!/[A-Za-z0-9가-힣]/.test(out)) return "";
   return out;
 }
 
@@ -384,6 +466,9 @@ const KEYWORDS: Record<FieldKey, string[]> = {
   // 화물 단위 화주는 사용자 양식의 콘솔(TOTAL) 케이스 — 행마다 다른 화주
   itemActualShipperName: ["실화주", "actual shipper", "real shipper"],
   itemShipperName: ["화주", "shipper", "consignor"],
+  // 화물 종류 — 엑셀에선 보통 Q'TY 옆 빈 헤더 셀에 코드(PL/CR/WB 등) 가 들어감.
+  // 명시 헤더가 있을 경우만 키워드로 매칭, 그 외엔 ExcelImport 가 Q'TY 우측 폴백으로 잡음.
+  cargoType: ["구분", "type", "kind", "package type"],
   widthCm: ["가로", "width", "폭"],
   lengthCm: ["세로", "length", "길이"],
   heightCm: ["높이", "height"],
