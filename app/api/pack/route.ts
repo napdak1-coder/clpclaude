@@ -9,7 +9,7 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { pack, type PackOptions } from "@/lib/packing/algorithm";
+import { packBest, type PackOptions } from "@/lib/packing/algorithm";
 import { getShipment } from "@/lib/repositories/shipments";
 import { savePlan } from "@/lib/repositories/clpPlans";
 import type { ContainerMode } from "@/types/plan";
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
       return fail("계산할 화물이 없습니다", 400);
     }
 
-    const result = pack(shipment.items, mode, opts);
+    const result = packBest(shipment.items, mode, opts);
 
     // 미리보기면 DB 저장 안 함, planId 도 없음
     if (preview) {

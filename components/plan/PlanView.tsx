@@ -14,6 +14,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PlanSummary } from "./PlanSummary";
 import { ContainerView2D } from "./ContainerView2D";
+import { ContainerItemList } from "./ContainerItemList";
 import { RowEditor } from "./RowEditor";
 import { PdfExport } from "@/components/export/PdfExport";
 import { ShareLink } from "@/components/export/ShareLink";
@@ -326,6 +327,7 @@ export function PlanView({
                 )}
 
                 <ContainerView2D plan={active} />
+                <ContainerItemList plan={active} />
                 {showEditor && !readOnly && (
                   <RowEditor
                     rows={active.rows}

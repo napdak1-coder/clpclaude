@@ -145,6 +145,36 @@ function toNullableText(s: string): string | null {
   return t.length === 0 ? null : t;
 }
 
+/**
+ * 샘플 갱신용 페이로드 작성 후 PUT.
+ * - bookingPatch: 비어있지 않은 booking 필드를 모두 포함 (사용자가 비운 칸은 빠지므로
+ *                 다음 로드 시에는 비어있던 칸도 비어있는 채로 복원된다)
+ * - rows: rowKey/id 같은 휘발성 식별자는 제외
+ */
+async function syncSample(
+  key: string,
+  booking: BookingState,
+  rows: CargoRow[],
+): Promise<void> {
+  const bookingPatch: Record<string, string> = {};
+  for (const [k, v] of Object.entries(booking)) {
+    if (typeof v === "string" && v.trim() !== "") bookingPatch[k] = v;
+  }
+  const persistedRows = rows.map((r) => {
+    // rowKey, id 만 제외 — 나머지는 그대로 유지
+    const { rowKey: _rk, id: _id, ...rest } = r;
+    return rest;
+  });
+  const res = await fetch(`/api/samples/${key}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ bookingPatch, rows: persistedRows }),
+  });
+  if (!res.ok) {
+    throw new Error(`샘플 갱신 실패 (${res.status})`);
+  }
+}
+
 export function ShipmentForm({
   initial,
   onSubmit,
@@ -158,6 +188,11 @@ export function ShipmentForm({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 샘플 버튼으로 로드된 경우의 키. 저장이 성공하면 같은 키로 PUT 해 샘플을 갱신한다.
+   * 일반 파일 import / 직접 입력은 null 로 비워둔다.
+   */
+  const [sampleKey, setSampleKey] = useState<string | null>(null);
 
   const updateBooking = (patch: Partial<BookingState>) =>
     setBooking((prev) => ({ ...prev, ...patch }));
@@ -224,6 +259,13 @@ export function ShipmentForm({
 
     setBusy(true);
     try {
+      // 샘플 동기화는 부킹 저장 전에 먼저. 부킹 저장이 router.push 로 페이지를 떠나면
+      // 이후 fetch 가 중단될 수 있어 순서를 명시적으로 잡는다. 실패해도 본 저장은 진행.
+      if (sampleKey) {
+        await syncSample(sampleKey, booking, rows).catch((e) => {
+          console.warn("샘플 동기화 실패", e);
+        });
+      }
       await onSubmit(payload);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "저장 실패";
@@ -239,24 +281,29 @@ export function ShipmentForm({
 
       <section>
         <ExcelImport
-          onImport={({ bookingPatch, rows: importedRows }) => {
-            // 부킹 자동 채움: 사용자가 이미 입력한 칸은 보존, 빈 칸만 덮어쓰기
+          onImport={({ bookingPatch, rows: importedRows }, source) => {
+            // 샘플에서 로드된 경우 키 보관, 그 외엔 클리어 (일반 파일은 샘플 갱신 대상 아님)
+            setSampleKey(source?.sampleKey ?? null);
+
+            // 샘플 로드는 booking 도 강제 덮어쓰기 (편집본을 그대로 복원하기 위함).
+            // 일반 파일 import 는 사용자 입력 보존 (빈 칸만 덮어쓰기).
             if (Object.keys(bookingPatch).length > 0) {
               setBooking((prev) => {
                 const next: BookingState = { ...prev };
                 for (const [k, v] of Object.entries(bookingPatch)) {
                   const key = k as keyof BookingState;
-                  if (!prev[key]) next[key] = v;
+                  if (source?.sampleKey || !prev[key]) next[key] = v;
                 }
                 return next;
               });
             }
             // 화물 행 처리:
-            //  - 빈 기본 행 1개뿐이면 교체
-            //  - 그 외(기존 데이터 있음) 사용자에게 확인:
-            //     OK → 교체 (기존 행 폐기)  /  취소 → 끝에 추가
+            //  - 샘플 로드: 항상 교체 (편집본을 그대로 복원)
+            //  - 일반 import + 빈 기본 행 1개뿐: 교체
+            //  - 그 외: 사용자 확인 (교체/추가)
             if (importedRows.length > 0) {
               setRows((prev) => {
+                if (source?.sampleKey) return importedRows;
                 const onlyEmpty =
                   prev.length === 1 &&
                   prev[0].widthCm === 0 &&
@@ -272,6 +319,21 @@ export function ShipmentForm({
             }
           }}
         />
+        {sampleKey && (
+          <div className="mt-2 flex items-center justify-between rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
+            <span>
+              샘플 <b>{sampleKey}</b> 로드됨 — 저장 시 이 샘플도 같이 갱신됩니다.
+            </span>
+            <button
+              type="button"
+              onClick={() => setSampleKey(null)}
+              className="rounded border border-emerald-300 bg-white px-2 py-0.5 text-emerald-700 hover:bg-emerald-100"
+              title="이번 저장은 샘플에 반영하지 않음"
+            >
+              샘플 연결 해제
+            </button>
+          </div>
+        )}
       </section>
 
       <section>

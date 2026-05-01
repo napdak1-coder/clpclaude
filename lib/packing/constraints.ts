@@ -10,8 +10,8 @@ import type { CargoSpec } from "../../types/cargo.ts";
 import type { ContainerSpec } from "../../types/container.ts";
 
 /**
- * 회전 여부에 따른 실효 사이즈 (width, length 스왑).
- * 높이는 회전과 무관.
+ * 회전 여부에 따른 실효 사이즈 (width, length 스왑) — 평면 90° 회전 (legacy).
+ * 6면 회전을 쓰려면 effectiveSizeFace 사용.
  */
 export function effectiveSize(
   item: Pick<CargoSpec, "width" | "length" | "height">,
@@ -21,6 +21,58 @@ export function effectiveSize(
     return { width: item.length, length: item.width, height: item.height };
   }
   return { width: item.width, length: item.length, height: item.height };
+}
+
+/**
+ * 화물의 6가지 자세(어느 면을 바닥으로 두는가) 별 실효 사이즈.
+ * faceIdx 0=W×L (높이 H, 기본), 1=L×W (평면 90°), 2=W×H (옆 눕힘),
+ *        3=H×W, 4=L×H, 5=H×L.
+ */
+export function effectiveSizeFace(
+  item: Pick<CargoSpec, "width" | "length" | "height">,
+  faceIdx: number,
+): { width: number; length: number; height: number } {
+  const w = item.width;
+  const l = item.length;
+  const h = item.height;
+  switch (faceIdx) {
+    case 0:
+      return { width: w, length: l, height: h };
+    case 1:
+      return { width: l, length: w, height: h };
+    case 2:
+      return { width: w, length: h, height: l };
+    case 3:
+      return { width: h, length: w, height: l };
+    case 4:
+      return { width: l, length: h, height: w };
+    case 5:
+      return { width: h, length: l, height: w };
+    default:
+      return { width: w, length: l, height: h };
+  }
+}
+
+/**
+ * 화물의 orientation 제한에 따라 허용되는 면 인덱스 목록.
+ * - free: 6면 모두
+ * - long_along_length: 평면에서 length ≥ width 인 면들 (장축이 길이방향)
+ * - fixed: 면 0 (원본 그대로)
+ */
+export function allowedFaces(
+  item: Pick<CargoSpec, "width" | "length" | "height" | "remarks">,
+): number[] {
+  const orientation = item.remarks.orientation;
+  if (orientation === "fixed") return [0];
+  const all = [0, 1, 2, 3, 4, 5];
+  if (orientation === "free") return all;
+  if (orientation === "long_along_length") {
+    return all.filter((idx) => {
+      const eff = effectiveSizeFace(item, idx);
+      return eff.length >= eff.width;
+    });
+  }
+  return all;
 }
 
 /**

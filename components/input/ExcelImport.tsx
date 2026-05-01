@@ -10,6 +10,8 @@
  *    - 화물 행: 매핑된 컬럼 → CargoRow
  *    - itemRemark / generalRemark 텍스트에서 "112X145X165(2)" 같은 사이즈 패턴 자동 추출 →
  *      width/length/height/quantity 자동 채움. 여러 사이즈("+" 구분) 는 행을 분할.
+ *
+ * 또한 "샘플파일" 버튼 — public/samples/ 에 박혀 있는 고정 양식을 한 번에 로드 (테스트 단축 경로).
  */
 
 import { useRef, useState } from "react";
@@ -40,7 +42,12 @@ export interface ExcelImportPayload {
 }
 
 interface ExcelImportProps {
-  onImport: (payload: ExcelImportPayload) => void;
+  /**
+   * @param payload  변환된 부킹 패치 + 화물 행
+   * @param source   샘플 버튼에서 로드된 경우 샘플 키. 일반 파일 업로드는 undefined.
+   *                 부모는 이 키를 보관해 두었다가 저장 시 같은 키로 샘플을 갱신할 수 있다.
+   */
+  onImport: (payload: ExcelImportPayload, source?: { sampleKey: string }) => void;
 }
 
 function toBoolish(v: unknown): boolean {
@@ -157,6 +164,245 @@ function applyDimension(base: CargoRow, dim: DimensionMatch): CargoRow {
   return next;
 }
 
+/**
+ * 파싱 결과 + 매핑 + 옵션을 받아 onImport 페이로드를 만드는 순수 함수.
+ * 매핑 UI 확정 버튼(confirmImport)과 샘플 한방 로드(loadSample) 양쪽에서
+ * 동일한 변환 로직을 공유하기 위해 추출돼 있다.
+ */
+function buildImportPayload(
+  parsed: ParsedExcel,
+  mapping: Record<string, FieldKey | null>,
+  applyMeta: boolean,
+  extractDimensions: boolean,
+): ExcelImportPayload {
+  /** 1) 부킹 패치 — 메타 + 매핑된 컬럼 첫 번째 비어있지 않은 값 */
+  const bookingPatch: Partial<Record<BookingFieldKey, string>> = applyMeta
+    ? bookingPatchFromMeta(parsed.meta)
+    : {};
+
+  const bookingHeaderMap = new Map<BookingFieldKey, string>();
+  for (const [header, field] of Object.entries(mapping)) {
+    if (!field) continue;
+    if (BOOKING_FIELD_SET.has(field)) {
+      bookingHeaderMap.set(field as BookingFieldKey, header);
+    }
+  }
+  for (const [field, header] of bookingHeaderMap.entries()) {
+    for (const row of parsed.rows) {
+      const v = row[header];
+      if (!isEmptyCell(v)) {
+        bookingPatch[field] = String(v).trim();
+        break;
+      }
+    }
+  }
+
+  /** 2) 화물 행 — 매핑된 컬럼 + REMARK 사이즈 자동 추출.
+   *  사용자 양식에서 House B/L 이 비어있어도 각 행은 별개의 부킹(다른 화주/Booking No/DEST)
+   *  이므로 자동 병합하지 않는다. 한 행 = 한 화물.
+   */
+  const cargoRows: CargoRow[] = [];
+
+  // 화물종류 자동 폴백: 명시 매핑(cargoType 헤더)이 없으면 Q'TY 매핑 헤더의 우측 인접 1칸을 시도.
+  // 사용자 양식에선 보통 Q'TY 옆이 빈 헤더(__EMPTY_n) 인데 그 셀에 PL/CR/WB 같은 코드가 들어있다.
+  let cargoTypeFallbackHeader: string | null = null;
+  const explicitCargoTypeHeader = Object.entries(mapping).find(
+    ([, f]) => f === "cargoType",
+  )?.[0];
+  if (!explicitCargoTypeHeader) {
+    const qtyHeader = Object.entries(mapping).find(
+      ([, f]) => f === "quantity",
+    )?.[0];
+    if (qtyHeader) {
+      const idx = parsed.headers.indexOf(qtyHeader);
+      if (idx >= 0 && idx + 1 < parsed.headers.length) {
+        const candidate = parsed.headers[idx + 1];
+        // 다른 필드로 매핑된 헤더는 건드리지 않음
+        if (!mapping[candidate]) cargoTypeFallbackHeader = candidate;
+      }
+    }
+  }
+
+  for (const row of parsed.rows) {
+    const base = makeEmptyRow();
+    let remarkText = "";
+
+    for (const [header, field] of Object.entries(mapping)) {
+      if (!field) continue;
+      if (!CARGO_FIELD_SET.has(field)) continue;
+      const value = row[header];
+      switch (field as CargoFieldKey) {
+        case "itemName":
+          base.itemName = String(value ?? "");
+          break;
+        case "itemActualShipperName":
+          base.actualShipperName = String(value ?? "").trim();
+          break;
+        case "itemShipperName":
+          base.shipperName = String(value ?? "").trim();
+          break;
+        case "widthCm":
+          base.widthCm = toNumberish(value);
+          break;
+        case "lengthCm":
+          base.lengthCm = toNumberish(value);
+          break;
+        case "heightCm":
+          base.heightCm = toNumberish(value);
+          break;
+        case "quantity":
+          base.quantity = Math.max(1, Math.round(toNumberish(value)));
+          break;
+        case "weightPerUnitKg":
+          base.weightPerUnitKg = toNumberish(value);
+          break;
+        case "cbm": {
+          // 엑셀 CBM 과 ABOUT 을 별도로 파싱
+          base.cbm = pickRowCbm(row, header);
+          base.aboutCbm = pickRowAbout(row, parsed.headers, header);
+          break;
+        }
+        case "noStacking":
+          base.noStacking = toBoolish(value);
+          break;
+        case "topOnly":
+          base.topOnly = toBoolish(value);
+          break;
+        case "orientation": {
+          const s = String(value ?? "").toLowerCase();
+          if (s.includes("fixed") || s.includes("회전")) base.orientation = "fixed";
+          else if (s.includes("long") || s.includes("장축")) base.orientation = "long_along_length";
+          else base.orientation = "free";
+          break;
+        }
+        case "heavierBelow":
+          base.heavierBelow = toBoolish(value);
+          break;
+        case "cargoType": {
+          base.cargoType = normalizeCargoType(value);
+          break;
+        }
+        case "itemRemark": {
+          const txt = String(value ?? "");
+          // raw 값은 일단 그대로 저장 — 아래 사이즈/플래그 추출 후 잔여 텍스트로 덮어씀
+          base.itemRemark = txt;
+          if (txt) remarkText += (remarkText ? " " : "") + txt;
+          break;
+        }
+      }
+    }
+
+    // 부킹용 generalRemark 컬럼에도 사이즈 텍스트가 있을 수 있어 같이 스캔
+    // (사용자 양식의 "REMARK" 가 itemRemark 로 매핑돼도 안전망 차원에서 둘 다 본다)
+    if (extractDimensions && !remarkText) {
+      const generalHeader = Object.entries(mapping).find(
+        ([, f]) => f === "generalRemark",
+      )?.[0];
+      if (generalHeader) {
+        const v = row[generalHeader];
+        if (typeof v === "string" && v.trim()) remarkText = v.trim();
+      }
+    }
+
+    const dimsMissing =
+      base.widthCm === 0 || base.lengthCm === 0 || base.heightCm === 0;
+    let dims: DimensionMatch[] = [];
+    if (extractDimensions && remarkText) {
+      dims = parseDimensionsFromText(remarkText);
+    }
+
+    // 명시 매핑 없는 경우 Q'TY 우측 인접 셀에서 cargoType 폴백
+    if (!explicitCargoTypeHeader && cargoTypeFallbackHeader) {
+      base.cargoType = normalizeCargoType(row[cargoTypeFallbackHeader]);
+    }
+
+    // REMARK 텍스트에서 플래그(다단금지/상단적재/중량조건/장축/회전금지)만 토글로 흡수.
+    // 메모(itemRemark) 본문은 사용자 요구에 따라 원본 REMARK 텍스트를 그대로 보존.
+    if (remarkText) {
+      const { flags } = extractFlagsAndStrip(remarkText);
+      if (flags.noStacking) base.noStacking = true;
+      if (flags.topOnly) base.topOnly = true;
+      if (flags.heavierBelow) base.heavierBelow = true;
+      if (flags.orientation) base.orientation = flags.orientation;
+    }
+
+    if (dims.length === 0) {
+      // 사이즈가 전혀 없는 행은 화물로 못 쓰니 스킵 (엑셀 CBM 자동계산은 더 이상 안 함)
+      if (
+        base.widthCm > 0 &&
+        base.lengthCm > 0 &&
+        base.heightCm > 0 &&
+        base.quantity > 0
+      ) {
+        cargoRows.push(base);
+      }
+    } else if (dims.length === 1) {
+      // 단일 사이즈: 매핑된 가로/세로/높이가 비어 있으면 보충 (cbm/unitSizes/메모 보존)
+      const target = dimsMissing ? applyDimension(base, dims[0]) : base;
+      if (
+        target.widthCm > 0 &&
+        target.lengthCm > 0 &&
+        target.heightCm > 0 &&
+        target.quantity > 0
+      ) {
+        cargoRows.push(target);
+      }
+    } else {
+      // 다중 사이즈 — 행을 분리하지 않고 한 행 안에 unitSizes 로 묶는다.
+      // 대표 사이즈는 첫 번째 사이즈, 수량은 모든 사이즈 합계.
+      const first = dims[0];
+      const totalQty = dims.reduce(
+        (s, d) => s + (d.count && d.count > 0 ? d.count : 1),
+        0,
+      );
+      const target: CargoRow = {
+        ...base,
+        widthCm: first.width,
+        lengthCm: first.length,
+        heightCm: first.height,
+        quantity: totalQty > 0 ? totalQty : base.quantity,
+        unitSizes: dims.map((d) => ({
+          width: d.width,
+          length: d.length,
+          height: d.height,
+          quantity: d.count && d.count > 0 ? d.count : 1,
+          weight: 0,
+        })),
+      };
+      if (
+        target.widthCm > 0 &&
+        target.lengthCm > 0 &&
+        target.heightCm > 0 &&
+        target.quantity > 0
+      ) {
+        cargoRows.push(target);
+      }
+    }
+  }
+
+  return { bookingPatch, rows: cargoRows };
+}
+
+/**
+ * 샘플 버튼 메타데이터.
+ * - key:      /api/samples/<key> 영속화 키. 사용자 편집본이 우선.
+ * - url:      key 에 해당하는 영속화본이 없을 때 폴백으로 파싱할 xlsx (public/samples/).
+ * - filename: 파서가 인식할 가짜 파일 이름 (확장자 보존용).
+ */
+const SAMPLE_FILES: Array<{
+  key: string;
+  label: string;
+  url: string;
+  filename: string;
+}> = [
+  {
+    key: "singapore-total",
+    label: "샘플: 싱가폴 TOTAL",
+    url: "/samples/singapore-total.xlsx",
+    filename: "싱가폴 TOTAL 샘플.xlsx",
+  },
+];
+
 export function ExcelImport({ onImport }: ExcelImportProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsed, setParsed] = useState<ParsedExcel | null>(null);
@@ -183,216 +429,65 @@ export function ExcelImport({ onImport }: ExcelImportProps) {
 
   const confirmImport = () => {
     if (!parsed) return;
-
-    /** 1) 부킹 패치 — 메타 + 매핑된 컬럼 첫 번째 비어있지 않은 값 */
-    const bookingPatch: Partial<Record<BookingFieldKey, string>> = applyMeta
-      ? bookingPatchFromMeta(parsed.meta)
-      : {};
-
-    const bookingHeaderMap = new Map<BookingFieldKey, string>();
-    for (const [header, field] of Object.entries(mapping)) {
-      if (!field) continue;
-      if (BOOKING_FIELD_SET.has(field)) {
-        bookingHeaderMap.set(field as BookingFieldKey, header);
-      }
-    }
-    for (const [field, header] of bookingHeaderMap.entries()) {
-      for (const row of parsed.rows) {
-        const v = row[header];
-        if (!isEmptyCell(v)) {
-          bookingPatch[field] = String(v).trim();
-          break;
-        }
-      }
-    }
-
-    /** 2) 화물 행 — 매핑된 컬럼 + REMARK 사이즈 자동 추출.
-     *  사용자 양식에서 House B/L 이 비어있어도 각 행은 별개의 부킹(다른 화주/Booking No/DEST)
-     *  이므로 자동 병합하지 않는다. 한 행 = 한 화물.
-     */
-    const cargoRows: CargoRow[] = [];
-
-    // 화물종류 자동 폴백: 명시 매핑(cargoType 헤더)이 없으면 Q'TY 매핑 헤더의 우측 인접 1칸을 시도.
-    // 사용자 양식에선 보통 Q'TY 옆이 빈 헤더(__EMPTY_n) 인데 그 셀에 PL/CR/WB 같은 코드가 들어있다.
-    let cargoTypeFallbackHeader: string | null = null;
-    const explicitCargoTypeHeader = Object.entries(mapping).find(
-      ([, f]) => f === "cargoType",
-    )?.[0];
-    if (!explicitCargoTypeHeader) {
-      const qtyHeader = Object.entries(mapping).find(
-        ([, f]) => f === "quantity",
-      )?.[0];
-      if (qtyHeader) {
-        const idx = parsed.headers.indexOf(qtyHeader);
-        if (idx >= 0 && idx + 1 < parsed.headers.length) {
-          const candidate = parsed.headers[idx + 1];
-          // 다른 필드로 매핑된 헤더는 건드리지 않음
-          if (!mapping[candidate]) cargoTypeFallbackHeader = candidate;
-        }
-      }
-    }
-
-    for (const row of parsed.rows) {
-      const base = makeEmptyRow();
-      let remarkText = "";
-
-      for (const [header, field] of Object.entries(mapping)) {
-        if (!field) continue;
-        if (!CARGO_FIELD_SET.has(field)) continue;
-        const value = row[header];
-        switch (field as CargoFieldKey) {
-          case "itemName":
-            base.itemName = String(value ?? "");
-            break;
-          case "itemActualShipperName":
-            base.actualShipperName = String(value ?? "").trim();
-            break;
-          case "itemShipperName":
-            base.shipperName = String(value ?? "").trim();
-            break;
-          case "widthCm":
-            base.widthCm = toNumberish(value);
-            break;
-          case "lengthCm":
-            base.lengthCm = toNumberish(value);
-            break;
-          case "heightCm":
-            base.heightCm = toNumberish(value);
-            break;
-          case "quantity":
-            base.quantity = Math.max(1, Math.round(toNumberish(value)));
-            break;
-          case "weightPerUnitKg":
-            base.weightPerUnitKg = toNumberish(value);
-            break;
-          case "cbm": {
-            // 엑셀 CBM 과 ABOUT 을 별도로 파싱
-            base.cbm = pickRowCbm(row, header);
-            base.aboutCbm = pickRowAbout(row, parsed.headers, header);
-            break;
-          }
-          case "noStacking":
-            base.noStacking = toBoolish(value);
-            break;
-          case "topOnly":
-            base.topOnly = toBoolish(value);
-            break;
-          case "orientation": {
-            const s = String(value ?? "").toLowerCase();
-            if (s.includes("fixed") || s.includes("회전")) base.orientation = "fixed";
-            else if (s.includes("long") || s.includes("장축")) base.orientation = "long_along_length";
-            else base.orientation = "free";
-            break;
-          }
-          case "heavierBelow":
-            base.heavierBelow = toBoolish(value);
-            break;
-          case "cargoType": {
-            base.cargoType = normalizeCargoType(value);
-            break;
-          }
-          case "itemRemark": {
-            const txt = String(value ?? "");
-            // raw 값은 일단 그대로 저장 — 아래 사이즈/플래그 추출 후 잔여 텍스트로 덮어씀
-            base.itemRemark = txt;
-            if (txt) remarkText += (remarkText ? " " : "") + txt;
-            break;
-          }
-        }
-      }
-
-      // 부킹용 generalRemark 컬럼에도 사이즈 텍스트가 있을 수 있어 같이 스캔
-      // (사용자 양식의 "REMARK" 가 itemRemark 로 매핑돼도 안전망 차원에서 둘 다 본다)
-      if (extractDimensions && !remarkText) {
-        const generalHeader = Object.entries(mapping).find(
-          ([, f]) => f === "generalRemark",
-        )?.[0];
-        if (generalHeader) {
-          const v = row[generalHeader];
-          if (typeof v === "string" && v.trim()) remarkText = v.trim();
-        }
-      }
-
-      const dimsMissing =
-        base.widthCm === 0 || base.lengthCm === 0 || base.heightCm === 0;
-      let dims: DimensionMatch[] = [];
-      if (extractDimensions && remarkText) {
-        dims = parseDimensionsFromText(remarkText);
-      }
-
-      // 명시 매핑 없는 경우 Q'TY 우측 인접 셀에서 cargoType 폴백
-      if (!explicitCargoTypeHeader && cargoTypeFallbackHeader) {
-        base.cargoType = normalizeCargoType(row[cargoTypeFallbackHeader]);
-      }
-
-      // REMARK 텍스트에서 플래그(다단금지/상단적재/중량조건/장축/회전금지)만 토글로 흡수.
-      // 메모(itemRemark) 본문은 사용자 요구에 따라 원본 REMARK 텍스트를 그대로 보존.
-      if (remarkText) {
-        const { flags } = extractFlagsAndStrip(remarkText);
-        if (flags.noStacking) base.noStacking = true;
-        if (flags.topOnly) base.topOnly = true;
-        if (flags.heavierBelow) base.heavierBelow = true;
-        if (flags.orientation) base.orientation = flags.orientation;
-      }
-
-      if (dims.length === 0) {
-        // 사이즈가 전혀 없는 행은 화물로 못 쓰니 스킵 (엑셀 CBM 자동계산은 더 이상 안 함)
-        if (
-          base.widthCm > 0 &&
-          base.lengthCm > 0 &&
-          base.heightCm > 0 &&
-          base.quantity > 0
-        ) {
-          cargoRows.push(base);
-        }
-      } else if (dims.length === 1) {
-        // 단일 사이즈: 매핑된 가로/세로/높이가 비어 있으면 보충 (cbm/unitSizes/메모 보존)
-        const target = dimsMissing ? applyDimension(base, dims[0]) : base;
-        if (
-          target.widthCm > 0 &&
-          target.lengthCm > 0 &&
-          target.heightCm > 0 &&
-          target.quantity > 0
-        ) {
-          cargoRows.push(target);
-        }
-      } else {
-        // 다중 사이즈 — 행을 분리하지 않고 한 행 안에 unitSizes 로 묶는다.
-        // 대표 사이즈는 첫 번째 사이즈, 수량은 모든 사이즈 합계.
-        const first = dims[0];
-        const totalQty = dims.reduce(
-          (s, d) => s + (d.count && d.count > 0 ? d.count : 1),
-          0,
-        );
-        const target: CargoRow = {
-          ...base,
-          widthCm: first.width,
-          lengthCm: first.length,
-          heightCm: first.height,
-          quantity: totalQty > 0 ? totalQty : base.quantity,
-          unitSizes: dims.map((d) => ({
-            width: d.width,
-            length: d.length,
-            height: d.height,
-            quantity: d.count && d.count > 0 ? d.count : 1,
-            weight: 0,
-          })),
-        };
-        if (
-          target.widthCm > 0 &&
-          target.lengthCm > 0 &&
-          target.heightCm > 0 &&
-          target.quantity > 0
-        ) {
-          cargoRows.push(target);
-        }
-      }
-    }
-
-    onImport({ bookingPatch, rows: cargoRows });
+    const payload = buildImportPayload(parsed, mapping, applyMeta, extractDimensions);
+    onImport(payload);
     setParsed(null);
     setMapping({});
     if (fileRef.current) fileRef.current.value = "";
+  };
+
+  /**
+   * 샘플 파일 한방 로드 — 매핑 UI 없이 즉시 import.
+   *
+   * 우선순위:
+   *  1) /api/samples/<key>  — 사용자가 이전에 편집·저장한 영속화본 (있으면 이걸 사용)
+   *  2) /samples/<file>.xlsx — 원본 양식 (영속화본이 없으면 파싱해 사용)
+   *
+   * 부모에는 sampleKey 를 source 로 함께 전달해, 저장 시 같은 키로 갱신할 수 있게 한다.
+   */
+  const loadSample = async (sample: {
+    key: string;
+    url: string;
+    filename: string;
+  }) => {
+    setError(null);
+    setBusy(true);
+    try {
+      // 1) 영속화본 시도
+      const apiRes = await fetch(`/api/samples/${sample.key}`);
+      if (apiRes.ok) {
+        const json = (await apiRes.json()) as {
+          success: boolean;
+          data?: { bookingPatch: ExcelImportPayload["bookingPatch"]; rows: CargoRow[] };
+        };
+        if (json.success && json.data) {
+          const rowsWithKeys: CargoRow[] = json.data.rows.map((r) => ({
+            ...r,
+            rowKey: crypto.randomUUID(),
+          }));
+          onImport(
+            { bookingPatch: json.data.bookingPatch, rows: rowsWithKeys },
+            { sampleKey: sample.key },
+          );
+          return;
+        }
+      }
+
+      // 2) xlsx 폴백
+      const res = await fetch(sample.url);
+      if (!res.ok) throw new Error(`샘플 파일 로드 실패 (${res.status})`);
+      const blob = await res.blob();
+      const file = new File([blob], sample.filename, { type: blob.type });
+      const result = await parseExcelFile(file);
+      const autoMapping = mapHeadersToFields(result.headers);
+      const payload = buildImportPayload(result, autoMapping, true, true);
+      onImport(payload, { sampleKey: sample.key });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "샘플 로드 실패";
+      setError(msg);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -411,6 +506,18 @@ export function ExcelImport({ onImport }: ExcelImportProps) {
             }}
           />
         </label>
+        {SAMPLE_FILES.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            disabled={busy}
+            onClick={() => void loadSample(s)}
+            className="rounded bg-emerald-600 px-3 py-1 text-white hover:bg-emerald-700 disabled:opacity-50"
+            title="저장된 샘플 양식을 매핑 없이 한 번에 불러옵니다. 편집·저장 시 같은 샘플로 갱신됩니다."
+          >
+            {s.label}
+          </button>
+        ))}
         <span className="text-xs text-neutral-500">
           헤더가 1행이 아니어도 자동 감지 (House B/L / Booking No 인식). 상단 메타(P.O.D, M.BOOKING NO 등)도 자동 추출.
         </span>

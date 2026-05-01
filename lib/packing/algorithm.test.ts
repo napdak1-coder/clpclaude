@@ -200,10 +200,9 @@ describe("pack — 카톤(CT) 분리", () => {
   });
 });
 
-describe("pack — 입고완료 그룹 몰기", () => {
-  it("입고완료 화물(c.cbm 입력) 은 한 컨테이너에 합산된다", () => {
+describe("pack — 입고완료 시각 배치", () => {
+  it("입고완료 화물(c.cbm 입력) 도 사이즈로 시각 배치되고, summary.completedTotalCbm 은 입력 CBM 합으로 정보 표시된다", () => {
     const cargoes = [
-      // 일반화물 50 m³ — 40FT 필요
       makeCargo({
         id: "a",
         cargoType: "PL",
@@ -212,7 +211,7 @@ describe("pack — 입고완료 그룹 몰기", () => {
         height: 250,
         quantity: 5,
       }),
-      // 입고완료 25 m³ — 20FT 한 대에 몰리길 기대
+      // 입고완료 (c.cbm=25 입력) — 시각 배치 대상이며 사이즈는 100×100×100
       makeCargo({
         id: "completed",
         cargoType: "PL",
@@ -223,12 +222,19 @@ describe("pack — 입고완료 그룹 몰기", () => {
       }),
     ];
     const result = pack(cargoes, "auto");
-    // 컨테이너 2개 (40FT + 20FT 또는 40FT + 40FT)
     assert.ok(result.containers.length >= 1);
-    // 입고완료 CBM 합계가 1개 컨테이너에 몰려야 함
-    const containersWithCompleted = result.containers.filter((c) => c.completedCbm > 0);
-    assert.equal(containersWithCompleted.length, 1, "입고완료 CBM 은 1개 컨테이너에 몰림");
-    assert.equal(containersWithCompleted[0].completedCbm, 25);
+    // 입고완료 cargo 도 시각 unit 으로 들어가야 함 — 어딘가의 row 에 cargoId="completed" 가 존재
+    const placedCompleted = result.containers.flatMap((c) =>
+      c.rows.flatMap((r) => [...r.bottomItems, ...r.topItems]),
+    ).some((p) => p.cargoId === "completed");
+    assert.ok(placedCompleted, "입고완료 화물도 시각 unit 으로 배치되어야 함");
+    // 더이상 컨테이너의 completedCbm 에는 합산되지 않음 (항상 0)
+    assert.equal(
+      result.containers.every((c) => c.completedCbm === 0),
+      true,
+      "completedCbm 은 시각 모델에서 0",
+    );
+    // summary.completedTotalCbm 은 사용자 입력 CBM(c.cbm) 합으로 정보 표시
     assert.equal(result.summary.completedTotalCbm, 25);
   });
 });
@@ -287,6 +293,11 @@ describe("pack — 중량 한도", () => {
     for (const c of result.containers) {
       assert.ok(c.totalWeight < c.spec.maxWeightKg);
     }
-    assert.ok(placed + result.unplaced.length === 20);
+    // unplaced 는 cargoId 단위로 그룹핑되므로 각 entry 의 quantity 를 합산해 비교
+    const unplacedUnitCount = result.unplaced.reduce(
+      (s, u) => s + (u.quantity ?? 1),
+      0,
+    );
+    assert.ok(placed + unplacedUnitCount === 20);
   });
 });
