@@ -17,8 +17,11 @@ import type { ContainerPlan, PlacedCargo } from "@/types/plan";
 
 interface ContainerView2DProps {
   plan: ContainerPlan;
-  /** 1cm 당 px 비율 (기본 0.5) — 길이/폭 모두에 적용 */
-  scale?: number;
+  /**
+   * 1cm 당 px 비율 (기본 0.5).
+   * 숫자면 가로·세로 동일. 객체면 가로(x)·세로(y) 별도.
+   */
+  scale?: number | { x: number; y: number };
 }
 
 const PADDING = 16;
@@ -29,10 +32,12 @@ const BOTTOM_LABEL_HEIGHT = 32; // 아래쪽 "입구" 라벨 영역
 
 export function ContainerView2D({ plan, scale = 0.5 }: ContainerView2DProps) {
   const { spec, rows } = plan;
+  const scaleX = typeof scale === "number" ? scale : scale.x;
+  const scaleY = typeof scale === "number" ? scale : scale.y;
   const innerWcm = spec.innerWidth;
   const innerLcm = spec.innerLength;
-  const containerWidthPx = innerWcm * scale;
-  const containerHeightPx = innerLcm * scale;
+  const containerWidthPx = innerWcm * scaleX;
+  const containerHeightPx = innerLcm * scaleY;
 
   const containerX = PADDING + ROW_NUM_WIDTH;
   const containerY = PADDING + TOP_LABEL_HEIGHT;
@@ -42,9 +47,9 @@ export function ContainerView2D({ plan, scale = 0.5 }: ContainerView2DProps) {
   const totalWidthPx = containerRight + RIGHT_INFO_WIDTH + PADDING;
   const totalHeightPx = containerBottom + BOTTOM_LABEL_HEIGHT + PADDING;
 
-  // cm → SVG 좌표 (입구가 아래)
-  const toSvgX = (cmX: number) => containerX + cmX * scale;
-  const toSvgY = (cmY: number) => containerBottom - cmY * scale;
+  // cm → SVG 좌표 (입구가 아래) — 가로·세로 별도 scale
+  const toSvgX = (cmX: number) => containerX + cmX * scaleX;
+  const toSvgY = (cmY: number) => containerBottom - cmY * scaleY;
 
   const hasDoorIssue = rows.some((r) => !r.doorPassable);
   const noVisual = rows.length === 0;
@@ -145,7 +150,8 @@ export function ContainerView2D({ plan, scale = 0.5 }: ContainerView2DProps) {
                 cumLengthCm={m.cumLengthCm}
                 innerWcm={innerWcm}
                 innerHeightCm={spec.innerHeight}
-                scale={scale}
+                scaleX={scaleX}
+                scaleY={scaleY}
                 containerX={containerX}
                 containerWidthPx={containerWidthPx}
                 containerRight={containerRight}
@@ -211,7 +217,8 @@ interface RowViewProps {
   cumLengthCm: number;
   innerWcm: number;
   innerHeightCm: number;
-  scale: number;
+  scaleX: number;
+  scaleY: number;
   containerX: number;
   containerWidthPx: number;
   containerRight: number;
@@ -225,7 +232,9 @@ function RowView({
   rowLengthCm,
   cumLengthCm,
   innerWcm,
-  scale,
+  innerHeightCm,
+  scaleX,
+  scaleY,
   containerX,
   containerWidthPx,
   containerRight,
@@ -242,7 +251,7 @@ function RowView({
     0,
   );
   const widthClearanceCm = Math.max(0, innerWcm - usedWidthCm);
-  const widthClearancePx = widthClearanceCm * scale;
+  const widthClearancePx = widthClearanceCm * scaleX;
 
   // 상단 빈 슬롯 식별 — bottomItems 중 같은 (x, y) 위치에 topItems 가 없는 박스
   const isTopOccupied = (b: PlacedCargo) =>
@@ -252,16 +261,26 @@ function RowView({
 
   return (
     <g>
-      {/* 행 구분선 (안쪽 끝 점선) — 첫 행 제외 시각 구분 */}
+      {/* 행 영역 배경 + 1px 외곽 테두리 — 행마다 구분 */}
+      <rect
+        x={containerX}
+        y={rowTopY}
+        width={containerWidthPx}
+        height={rowHeightPx}
+        fill={row.index % 2 === 0 ? "#fafbfc" : "#ffffff"}
+        stroke="#1e293b"
+        strokeWidth={1}
+      />
+
+      {/* 행 구분선 (안쪽 끝 1px 실선) — 첫 행 제외 */}
       {row.index > 0 && (
         <line
           x1={containerX}
           y1={rowBottomY}
           x2={containerRight}
           y2={rowBottomY}
-          stroke="#d4d4d4"
-          strokeDasharray="2 3"
-          strokeWidth={0.5}
+          stroke="#1e293b"
+          strokeWidth={1}
         />
       )}
 
@@ -287,37 +306,77 @@ function RowView({
           key={`b-${i}`}
           item={b}
           layer="bottom"
-          scale={scale}
+          scaleX={scaleX}
+          scaleY={scaleY}
           toSvgX={toSvgX}
           toSvgY={toSvgY}
         />
       ))}
 
-      {/* 상단 빈 슬롯 (occupied 안 된 bottom 박스 위에 회색 점선) */}
-      {row.bottomItems
-        .filter((b) => !isTopOccupied(b))
-        .map((b, i) => (
-          <PlacedRect
-            key={`empty-top-${i}`}
-            item={b}
-            layer="empty-top"
-            scale={scale}
-            toSvgX={toSvgX}
-            toSvgY={toSvgY}
-          />
-        ))}
-
-      {/* 상단 화물 박스 */}
+      {/* 상단 화물 박스 — 행의 위쪽 sub-band 에 별도 그림 (하단과 안 겹침) */}
       {row.topItems.map((t, i) => (
         <PlacedRect
           key={`t-${i}`}
           item={t}
           layer="top"
-          scale={scale}
+          scaleX={scaleX}
+          scaleY={scaleY}
           toSvgX={toSvgX}
           toSvgY={toSvgY}
         />
       ))}
+
+      {/* 각 컬럼 최상단 위 천장 여유 — 세로 양쪽 화살표 + cm 표시 */}
+      {row.bottomItems.map((b, i) => {
+        const colTops = row.topItems.filter((t) => t.position.x === b.position.x);
+        let topmost: PlacedCargo = b;
+        let stackHeight = b.size.height;
+        if (colTops.length > 0) {
+          topmost = colTops.reduce((max, t) =>
+            t.position.y + t.size.length > max.position.y + max.size.length ? t : max,
+          );
+          stackHeight = b.size.height + colTops.reduce((s, t) => s + t.size.height, 0);
+        }
+        const colClearance = Math.max(0, innerHeightCm - stackHeight);
+        const w = topmost.size.width * scaleX;
+        if (w < 28) return null;
+        const cx = toSvgX(topmost.position.x) + w / 2;
+        const labelTopY = toSvgY(row.yEnd);                                  // 행 위 끝 (svg y 작음)
+        const topmostTopY = toSvgY(topmost.position.y + topmost.size.length); // 최상단 화물의 위 끝 (svg y 큼)
+        const arrowH = topmostTopY - labelTopY;
+        if (arrowH < 14) return null;
+        const pad = 2;
+        const y1 = labelTopY + pad;
+        const y2 = topmostTopY - pad;
+        const midY = (y1 + y2) / 2;
+        return (
+          <g key={`clr-${i}`}>
+            {/* 세로선 */}
+            <line x1={cx} y1={y1} x2={cx} y2={y2} stroke="#7c3aed" strokeWidth={1.2} />
+            {/* 위쪽 ▲ (위로 향함) */}
+            <polygon
+              points={`${cx},${y1} ${cx - 3.5},${y1 + 5} ${cx + 3.5},${y1 + 5}`}
+              fill="#7c3aed"
+            />
+            {/* 아래쪽 ▼ (아래로 향함) */}
+            <polygon
+              points={`${cx},${y2} ${cx - 3.5},${y2 - 5} ${cx + 3.5},${y2 - 5}`}
+              fill="#7c3aed"
+            />
+            {/* cm 텍스트 — 세로선 옆에 가로로 */}
+            <text
+              x={cx + 6}
+              y={midY + 3}
+              fontSize={9}
+              fontWeight={700}
+              fill="#7c3aed"
+              style={{ pointerEvents: "none" }}
+            >
+              {Math.round(colClearance)}cm
+            </text>
+          </g>
+        );
+      })}
 
       {/* 좌측 행 번호 + 행 길이 + 누적 길이 라벨 */}
       <g>
@@ -400,20 +459,21 @@ function RowView({
 interface PlacedRectProps {
   item: PlacedCargo;
   layer: "bottom" | "top" | "empty-top";
-  scale: number;
+  scaleX: number;
+  scaleY: number;
   toSvgX: (cmX: number) => number;
   toSvgY: (cmY: number) => number;
 }
 
-function PlacedRect({ item, layer, scale, toSvgX, toSvgY }: PlacedRectProps) {
+function PlacedRect({ item, layer, scaleX, scaleY, toSvgX, toSvgY }: PlacedRectProps) {
   const x = toSvgX(item.position.x);
   const y = toSvgY(item.position.y + item.size.length);
-  const w = item.size.width * scale;
-  const h = item.size.length * scale;
+  const w = item.size.width * scaleX;
+  const h = item.size.length * scaleY;
 
   let fill = "#bfdbfe";
   let stroke = "#3b82f6";
-  let dasharray: string | undefined;
+  let dasharray: string | undefined = "4 3"; // 모든 화물 박스는 점선
   let opacity = 1;
   let label = item.shipper || item.name || "";
   let title = `${item.shipper ?? ""} ${item.cargoType ?? ""} ${item.size.width}×${item.size.length}×${item.size.height}cm`;
@@ -422,7 +482,7 @@ function PlacedRect({ item, layer, scale, toSvgX, toSvgY }: PlacedRectProps) {
     fill = "#fed7aa";
     stroke = "#f97316";
     dasharray = "4 3";
-    opacity = 0.9;
+    opacity = 1;
     title = "[상단] " + title;
   } else if (layer === "empty-top") {
     fill = "rgba(240, 240, 240, 0.4)";
@@ -449,38 +509,50 @@ function PlacedRect({ item, layer, scale, toSvgX, toSvgY }: PlacedRectProps) {
       >
         <title>{title}</title>
       </rect>
-      {layer !== "empty-top" && w > 32 && h > 24 && (
-        <text
-          x={x + w / 2}
-          y={y + h / 2 - 3}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fontSize={9}
-          fill="#262626"
-        >
-          {truncate(label, Math.max(6, Math.floor(w / 7)))}
-        </text>
-      )}
-      {layer !== "empty-top" && w > 40 && h > 36 && (
-        <text
-          x={x + w / 2}
-          y={y + h / 2 + 9}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fontSize={8}
-          fill="#525252"
-        >
-          {item.size.width}×{item.size.length}
-          {item.cargoType ? ` · ${item.cargoType}` : ""}
-        </text>
-      )}
+      {layer !== "empty-top" && h > 12 && (() => {
+        const sizeStr = `${item.size.width}×${item.size.length}×${item.size.height}${item.cargoType ? `·${item.cargoType}` : ""}`;
+        // 한글은 ASCII 보다 넓음. 한글 글자 1.0× / 영숫자 0.55×.
+        const charWeight = (s: string) =>
+          [...s].reduce((sum, c) => sum + (/[\u3131-\uD79D]/.test(c) ? 1.0 : 0.55), 0);
+        const labelW = Math.max(charWeight(label), 4);
+        const sizeW = Math.max(charWeight(sizeStr), 4);
+        // 박스 폭에 맞게 글자 크기 결정
+        const fontByMainW = w / labelW;
+        const fontBySubW = w / sizeW;
+        const fontByH = h / 2.6; // 2줄 들어갈 높이
+        const fontMain = Math.min(12, Math.max(5, Math.floor(Math.min(fontByMainW, fontByH))));
+        const fontSub = Math.min(10, Math.max(4, Math.floor(Math.min(fontBySubW, fontByH * 0.85))));
+        const showSub = h > 22 && fontSub >= 5;
+        return (
+          <g>
+            <text
+              x={x + w / 2}
+              y={y + h / 2 - (showSub ? fontSub * 0.6 : 0)}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={fontMain}
+              fontWeight={700}
+              fill="#1f2937"
+            >
+              {label}
+            </text>
+            {showSub && (
+              <text
+                x={x + w / 2}
+                y={y + h / 2 + fontMain * 0.7}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={fontSub}
+                fill="#525252"
+              >
+                {sizeStr}
+              </text>
+            )}
+          </g>
+        );
+      })()}
     </g>
   );
-}
-
-function truncate(s: string, max: number): string {
-  if (!s) return "";
-  return s.length <= max ? s : s.slice(0, Math.max(1, max - 1)) + "…";
 }
 
 interface LegendProps {

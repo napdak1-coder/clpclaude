@@ -30,8 +30,6 @@ import type {
   CLPResult,
   ContainerMode,
   ContainerPlan,
-  PlacedCargo,
-  Row,
   UnplacedItem,
 } from "../../types/plan.ts";
 import {
@@ -40,11 +38,11 @@ import {
   getContainerSpec,
 } from "./containers.ts";
 import {
-  allowedFaces,
-  canStackOn,
-  effectiveSizeFace,
-  withinWeightLimit,
-} from "./constraints.ts";
+  makeContainerState,
+  tryPlaceUnit,
+  type ContainerPackState,
+} from "./extreme-point.ts";
+import { computeDisplayRows } from "./display-rows.ts";
 
 interface UnitItem {
   unitId: string;
@@ -61,25 +59,11 @@ interface UnitItem {
   remarks: Remark;
 }
 
-interface RowState {
-  index: number;
-  yStart: number;
-  yEnd: number;
-  xCursor: number;
-  bottomItems: PlacedCargo[];
-  topItems: PlacedCargo[];
-  bottomMaxHeight: number;
-  topMaxHeight: number;
-}
-
 interface ContainerState {
   index: number;
   spec: ContainerSpec;
-  rows: RowState[];
-  yCursor: number;
-  totalWeight: number;
-  /** 시각 unit (placed) 의 CBM 누적 — 패킹 중 실시간 갱신 */
-  visualCbm: number;
+  /** extreme-point packer 상태 (placements, candidates, totalWeight, visualCbm) */
+  packState: ContainerPackState;
   /** CT 화물 CBM 누적 (시각 unit 없이 합산만) */
   ctCbm: number;
   /** 입고완료 화물 CBM 누적 */
@@ -278,10 +262,7 @@ function makeContainer(index: number, spec: ContainerSpec): ContainerState {
   return {
     index,
     spec,
-    rows: [],
-    yCursor: 0,
-    totalWeight: 0,
-    visualCbm: 0,
+    packState: makeContainerState(),
     ctCbm: 0,
     completedCbm: 0,
     bulkItems: [],
@@ -290,332 +271,12 @@ function makeContainer(index: number, spec: ContainerSpec): ContainerState {
 
 /** 컨테이너의 남은 CBM 여유 = maxCbm - (visual + ct + completed) */
 function remainingCbm(c: ContainerState): number {
-  return getContainerCbm(c.spec) - (c.visualCbm + c.ctCbm + c.completedCbm);
-}
-
-/**
- * 화물의 6면 중 컨테이너에 들어가는 첫 면 (effectiveSize 결과) 반환.
- * 입구 통과 여부는 알고리즘 외부에서 doorPassable 로 별도 체크하므로 여기선 차원만 검사.
- * orientation 제한(fixed/long_along_length)은 allowedFaces 가 처리.
- */
-function pickFace(
-  item: UnitItem,
-  container: ContainerSpec,
-): { width: number; length: number; height: number; faceIdx: number } | null {
-  const cargoLike = asCargoLike(item);
-  for (const idx of allowedFaces(cargoLike)) {
-    const eff = effectiveSizeFace(cargoLike, idx);
-    if (
-      eff.width <= container.innerWidth &&
-      eff.length <= container.innerLength &&
-      eff.height <= container.innerHeight
-    ) {
-      return { ...eff, faceIdx: idx };
-    }
-  }
-  return null;
-}
-
-function asCargoLike(
-  u: UnitItem,
-): Pick<CargoSpec, "width" | "length" | "height" | "weightPerUnit" | "remarks"> {
-  return {
-    width: u.width,
-    length: u.length,
-    height: u.height,
-    weightPerUnit: u.weight,
-    remarks: u.remarks,
-  };
-}
-
-function openRow(c: ContainerState, rowLength: number): RowState | null {
-  const yEnd = c.yCursor + rowLength;
-  if (yEnd > c.spec.innerLength) return null;
-  const row: RowState = {
-    index: c.rows.length,
-    yStart: c.yCursor,
-    yEnd,
-    xCursor: 0,
-    bottomItems: [],
-    topItems: [],
-    bottomMaxHeight: 0,
-    topMaxHeight: 0,
-  };
-  c.rows.push(row);
-  c.yCursor = yEnd;
-  return row;
-}
-
-function placeBottom(
-  row: RowState,
-  c: ContainerState,
-  item: UnitItem,
-  eff: { width: number; length: number; height: number },
-): PlacedCargo {
-  // 평면 회전 여부 — 시각화상 의미만 갖는 boolean (eff.width 가 원본 W 와 다르면 회전)
-  const rotated = eff.width !== item.width || eff.length !== item.length;
-  const placed: PlacedCargo = {
-    cargoId: item.cargoId,
-    shipper: item.shipper,
-    name: item.name,
-    cargoType: item.cargoType,
-    cfsCbm: item.cfsCbm,
-    layer: "bottom",
-    position: { x: row.xCursor, y: row.yStart },
-    size: { width: eff.width, length: eff.length, height: eff.height },
-    rotated,
-    weight: item.weight,
-    remarks: item.remarks,
-  };
-  row.bottomItems.push(placed);
-  row.xCursor += eff.width;
-  if (eff.height > row.bottomMaxHeight) row.bottomMaxHeight = eff.height;
-  const newYEnd = row.yStart + Math.max(row.yEnd - row.yStart, eff.length);
-  if (newYEnd > c.spec.innerLength) {
-    throw new Error("행 길이 확장이 컨테이너 길이를 초과");
-  }
-  row.yEnd = newYEnd;
-  c.yCursor = Math.max(c.yCursor, row.yEnd);
-  c.totalWeight += item.weight;
-  c.visualCbm += (eff.width * eff.length * eff.height) / 1_000_000;
-  return placed;
-}
-
-/**
- * 한 column(같은 x, y 위치) 에 이미 쌓인 stack 의 최상단 item + 누적 높이.
- * stack 이 비어있으면 bottom 자체를 최상단으로 본다 (높이 = bottom.size.height).
- */
-function getStackTop(
-  row: RowState,
-  bottom: PlacedCargo,
-): { topItem: PlacedCargo; stackHeight: number } {
-  const sameColumnTops = row.topItems.filter(
-    (t) =>
-      t.position.x === bottom.position.x && t.position.y === bottom.position.y,
+  return (
+    getContainerCbm(c.spec) -
+    (c.packState.visualCbm + c.ctCbm + c.completedCbm)
   );
-  if (sameColumnTops.length === 0) {
-    return { topItem: bottom, stackHeight: bottom.size.height };
-  }
-  // 가장 마지막에 추가된 top 이 가장 위 (push 순서 = 쌓는 순서)
-  const topItem = sameColumnTops[sameColumnTops.length - 1];
-  const stackHeight =
-    bottom.size.height +
-    sameColumnTops.reduce((s, t) => s + t.size.height, 0);
-  return { topItem, stackHeight };
 }
 
-/**
- * 다단 적재 시도 (3층, 4층 …).
- *
- * 각 bottom column 의 stack 최상단을 보고:
- *  - 새 item 이 그 최상단보다 작거나 같은 가로/세로
- *  - canStackOn(new, topOfStack) — 다단금지/중량조건 통과
- *  - stackHeight + new.height ≤ innerHeight (천장 안 닿음)
- *  - 컨테이너 중량 한도 내
- * 모두 통과하면 최상단 위에 새 layer 로 push.
- */
-function tryPlaceOnTop(
-  row: RowState,
-  c: ContainerState,
-  item: UnitItem,
-  eff: { width: number; length: number; height: number },
-): PlacedCargo | null {
-  let bestBottom: PlacedCargo | null = null;
-  let bestStackHeight = -1;
-  for (const bottom of row.bottomItems) {
-    const { topItem, stackHeight } = getStackTop(row, bottom);
-    if (eff.width > topItem.size.width || eff.length > topItem.size.length) continue;
-    const topLike = { weightPerUnit: topItem.weight, remarks: topItem.remarks };
-    if (!canStackOn(asCargoLike(item), topLike)) continue;
-    if (stackHeight + eff.height > c.spec.innerHeight) continue;
-    if (!withinWeightLimit(c.totalWeight, item.weight, c.spec)) continue;
-    if (stackHeight > bestStackHeight) {
-      bestStackHeight = stackHeight;
-      bestBottom = bottom;
-    }
-  }
-  if (!bestBottom) return null;
-
-  const rotated = eff.width !== item.width || eff.length !== item.length;
-  const placed: PlacedCargo = {
-    cargoId: item.cargoId,
-    shipper: item.shipper,
-    name: item.name,
-    cargoType: item.cargoType,
-    cfsCbm: item.cfsCbm,
-    layer: "top",
-    position: { x: bestBottom.position.x, y: bestBottom.position.y },
-    size: { width: eff.width, length: eff.length, height: eff.height },
-    rotated,
-    weight: item.weight,
-    remarks: item.remarks,
-  };
-  row.topItems.push(placed);
-  const newStackTotal = bestStackHeight - bestBottom.size.height + eff.height;
-  if (newStackTotal > row.topMaxHeight) row.topMaxHeight = newStackTotal;
-  c.totalWeight += item.weight;
-  c.visualCbm += (eff.width * eff.length * eff.height) / 1_000_000;
-  return placed;
-}
-
-/**
- * 일반 화물 1 unit 을 컨테이너에 시도.
- *
- * Best-fit 정책:
- *  - 기존 모든 row 를 후보로 평가 → 끼워넣고 남는 가로 여유(slack)가 가장 작은 row 선택
- *    (tightness 큰 곳 = 끝까지 알차게 채움)
- *  - slack 동률이면 row 길이 확장이 가장 적은 곳 선택
- *  - 어떤 기존 row 도 안 맞으면 새 row 열어서 placeBottom
- *
- * Top fallback 은 호출자(pack) 가 본 함수 실패 시 별도로 시도한다 — 본 함수는 bottom 만 본다.
- */
-function tryPlaceInContainer(
-  c: ContainerState,
-  item: UnitItem,
-): PlacedCargo | null {
-  const eff = pickFace(item, c.spec);
-  if (!eff) return null;
-  if (!withinWeightLimit(c.totalWeight, item.weight, c.spec)) return null;
-  const itemCbm = (eff.width * eff.length * eff.height) / 1_000_000;
-  if (itemCbm > remainingCbm(c)) return null;
-
-  // ① 기존 row 의 가로 여유에 끼우기 (best-fit)
-  let bestRow: RowState | null = null;
-  let bestSlackWidth = Number.POSITIVE_INFINITY;
-  let bestLengthGrowth = Number.POSITIVE_INFINITY;
-  for (const row of c.rows) {
-    const remainingWidth = c.spec.innerWidth - row.xCursor;
-    if (eff.width > remainingWidth) continue;
-    const currentLen = row.yEnd - row.yStart;
-    const projectedLen = Math.max(currentLen, eff.length);
-    const projectedYEnd = row.yStart + projectedLen;
-    const nextRowStart = c.rows
-      .filter((r) => r.yStart > row.yStart)
-      .reduce<number>(
-        (min, r) => (r.yStart < min ? r.yStart : min),
-        c.spec.innerLength,
-      );
-    if (projectedYEnd > nextRowStart) continue;
-    const slackWidth = remainingWidth - eff.width;
-    const lengthGrowth = projectedLen - currentLen;
-    if (
-      slackWidth < bestSlackWidth ||
-      (slackWidth === bestSlackWidth && lengthGrowth < bestLengthGrowth)
-    ) {
-      bestSlackWidth = slackWidth;
-      bestLengthGrowth = lengthGrowth;
-      bestRow = row;
-    }
-  }
-  if (bestRow) return placeBottom(bestRow, c, item, eff);
-
-  // ② 행 안 빈 length 영역에 끼우기 (2D row gap fill)
-  //    한 row 안에 짧은 화물이 있을 때 그 화물 안쪽(yEnd 쪽) 빈 사각형에 추가 화물 배치.
-  //    occupied bottom 들의 (x+w, y+l) 모서리 점을 후보로 빈 사각형 검사.
-  for (const row of c.rows) {
-    const placed = tryPlaceInRowGap(row, c, item, eff, itemCbm);
-    if (placed) return placed;
-  }
-
-  // ③ 새 row — 마지막 폴백
-  if (eff.width > c.spec.innerWidth) return null;
-  const newRow = openRow(c, eff.length);
-  if (!newRow) return null;
-  return placeBottom(newRow, c, item, eff);
-}
-
-/**
- * 행 안 빈 length 영역에 화물 끼우기 (단순 guillotine fit).
- *
- * 각 occupied bottom 의 (x, y+length) 위치 — 그 화물 바로 안쪽(컨테이너 안쪽 방향) 빈 영역.
- * 새 화물이 그 영역에 들어가고 다른 occupied 와 충돌 안 하면 배치.
- *
- * row.yEnd 는 변경하지 않음 (이미 충분히 큼). row 의 mass center 가 아닌 빈 자리만 채움.
- */
-function tryPlaceInRowGap(
-  row: RowState,
-  c: ContainerState,
-  item: UnitItem,
-  eff: { width: number; length: number; height: number },
-  itemCbm: number,
-): PlacedCargo | null {
-  const rowEnd = row.yEnd;
-  if (eff.length === 0 || eff.width === 0) return null;
-
-  // 후보 위치 = 각 occupied bottom 의 안쪽 모서리 (x, y+length) + 행 시작 (0, yStart)
-  const candidates: Array<{ x: number; y: number }> = [
-    { x: 0, y: row.yStart },
-  ];
-  for (const b of row.bottomItems) {
-    candidates.push({ x: b.position.x, y: b.position.y + b.size.length });
-    candidates.push({ x: b.position.x + b.size.width, y: b.position.y });
-  }
-
-  for (const cand of candidates) {
-    if (cand.x + eff.width > c.spec.innerWidth) continue;
-    if (cand.y + eff.length > rowEnd) continue;
-    if (cand.y < row.yStart) continue;
-
-    // 충돌 검사 — 후보 사각형이 다른 occupied 와 겹치는지
-    let collides = false;
-    for (const b of row.bottomItems) {
-      const bx1 = b.position.x;
-      const by1 = b.position.y;
-      const bx2 = bx1 + b.size.width;
-      const by2 = by1 + b.size.length;
-      const nx1 = cand.x;
-      const ny1 = cand.y;
-      const nx2 = nx1 + eff.width;
-      const ny2 = ny1 + eff.length;
-      if (nx1 < bx2 && nx2 > bx1 && ny1 < by2 && ny2 > by1) {
-        collides = true;
-        break;
-      }
-    }
-    if (collides) continue;
-
-    // 배치 — placeBottom 과 유사하지만 row.xCursor / row.yEnd 변경 안 함 (gap 채움)
-    const rotated = eff.width !== item.width || eff.length !== item.length;
-    const placed: PlacedCargo = {
-      cargoId: item.cargoId,
-      shipper: item.shipper,
-      name: item.name,
-      cargoType: item.cargoType,
-      cfsCbm: item.cfsCbm,
-      layer: "bottom",
-      position: { x: cand.x, y: cand.y },
-      size: { width: eff.width, length: eff.length, height: eff.height },
-      rotated,
-      weight: item.weight,
-      remarks: item.remarks,
-    };
-    row.bottomItems.push(placed);
-    if (eff.height > row.bottomMaxHeight) row.bottomMaxHeight = eff.height;
-    c.totalWeight += item.weight;
-    c.visualCbm += itemCbm;
-    return placed;
-  }
-  return null;
-}
-
-/**
- * 일반 화물 1 unit 의 상단 적재 시도 (모든 컨테이너 / 모든 row 의 stack 위에 올리기).
- * 6면 회전 활용 — 컨테이너마다 다른 면이 fit 될 수 있어 컨테이너별 pickFace.
- */
-function tryPlaceOnTopAcross(
-  containers: ContainerState[],
-  item: UnitItem,
-): PlacedCargo | null {
-  for (const c of containers) {
-    const eff = pickFace(item, c.spec);
-    if (!eff) continue;
-    for (const row of c.rows) {
-      const placed = tryPlaceOnTop(row, c, item, eff);
-      if (placed) return placed;
-    }
-  }
-  return null;
-}
 
 /**
  * CT/입고완료 cargo 그룹을 컨테이너에 분배.
@@ -699,52 +360,23 @@ function orderForCompleted(
   return [primary, ...sortedAsc.filter((c) => c.index !== primary.index)];
 }
 
-function finalizeRow(row: RowState, spec: ContainerSpec): Row {
-  // 다단 적재(3층+) 지원 — 각 column 별 stack 합 high 의 max 가 행 실제 높이
-  let totalHeight = row.bottomMaxHeight;
-  for (const b of row.bottomItems) {
-    const stackTops = row.topItems.filter(
-      (t) => t.position.x === b.position.x && t.position.y === b.position.y,
-    );
-    const colHeight =
-      b.size.height + stackTops.reduce((s, t) => s + t.size.height, 0);
-    if (colHeight > totalHeight) totalHeight = colHeight;
-  }
-  const topClearance = spec.innerHeight - totalHeight;
-  const doorPassable = totalHeight <= spec.doorHeight;
-  return {
-    index: row.index,
-    yStart: row.yStart,
-    yEnd: row.yEnd,
-    bottomItems: row.bottomItems,
-    topItems: row.topItems,
-    bottomMaxHeight: row.bottomMaxHeight,
-    topMaxHeight: row.topMaxHeight,
-    topClearance,
-    doorPassable,
-  };
-}
-
 function finalizeContainer(c: ContainerState): ContainerPlan {
-  const rows = c.rows.map((r) => finalizeRow(r, c.spec));
+  // 자유 좌표 placements → 화면용 Row[] 변환 (display-rows 가 layered display 적용)
+  const rows = computeDisplayRows(c.packState.placements, c.spec);
   const containerCbm = getContainerCbm(c.spec);
-  let visualCbm = 0;
-  for (const r of rows) {
-    for (const item of [...r.bottomItems, ...r.topItems]) {
-      visualCbm +=
-        (item.size.width * item.size.length * item.size.height) / 1_000_000;
-    }
-  }
+  const visualCbm = c.packState.visualCbm;
   const totalLoadedCbm = visualCbm + c.ctCbm + c.completedCbm;
   const cbmFillRate =
     containerCbm > 0 ? (totalLoadedCbm / containerCbm) * 100 : 0;
   const weightFillRate =
-    c.spec.maxWeightKg > 0 ? (c.totalWeight / c.spec.maxWeightKg) * 100 : 0;
+    c.spec.maxWeightKg > 0
+      ? (c.packState.totalWeight / c.spec.maxWeightKg) * 100
+      : 0;
   return {
     index: c.index,
     spec: c.spec,
     rows,
-    totalWeight: c.totalWeight,
+    totalWeight: c.packState.totalWeight,
     totalCbm: visualCbm,
     ctCbm: c.ctCbm,
     completedCbm: c.completedCbm,
@@ -935,28 +567,30 @@ export function pack(
     return visualContainers;
   };
 
-  // 일반 화물 — bottom 우선, 실패 시 top fallback
+  // 일반 화물 — extreme-point 자유 좌표 배치. tryPlaceUnit 이 z=0/stack 모두 시도.
   for (const u of generalUnits) {
     const candidates = candidatesFor(u);
     let placed = false;
     for (const c of candidates) {
-      if (tryPlaceInContainer(c, u)) {
+      if (tryPlaceUnit(u, c.packState, c.spec)) {
         placed = true;
         break;
       }
     }
-    if (!placed) {
-      const top = tryPlaceOnTopAcross(candidates, u);
-      if (top) placed = true;
-    }
     if (!placed) unplaced.push(u);
   }
 
-  // topOnly — 빈 top 슬롯에 (시각 가능한 컨테이너만 시도)
+  // topOnly — 같은 함수 사용하지만 unit.remarks.topOnly 가 z=0 거부 (자동으로 stack 시도만)
   for (const u of topOnlyUnits) {
     const candidates = candidatesFor(u);
-    const top = tryPlaceOnTopAcross(candidates, u);
-    if (!top) unplaced.push(u);
+    let placed = false;
+    for (const c of candidates) {
+      if (tryPlaceUnit(u, c.packState, c.spec)) {
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) unplaced.push(u);
   }
 
   // 6) CT 화물 CBM → 컨테이너별 남은 여유 CBM 에 합산 (cargo 단위 분할 추적)
@@ -1092,13 +726,7 @@ function makeUnplacedFromCargo(
 
 /** 컨테이너에 이미 적재된 모든 CBM (시각 unit + ct + completed) 합 */
 function computeContainerLoadedCbm(c: ContainerState): number {
-  let visual = 0;
-  for (const r of c.rows) {
-    for (const item of [...r.bottomItems, ...r.topItems]) {
-      visual += (item.size.width * item.size.length * item.size.height) / 1_000_000;
-    }
-  }
-  return visual + c.ctCbm + c.completedCbm;
+  return c.packState.visualCbm + c.ctCbm + c.completedCbm;
 }
 
 /**

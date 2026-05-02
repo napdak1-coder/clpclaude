@@ -52,3 +52,6 @@ next-env.d.ts
 
 # Claude / agent transcripts
 .claude/
+
+# 임시 디버그 스크린샷
+/tmp-screenshots/

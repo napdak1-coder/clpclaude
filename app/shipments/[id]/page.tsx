@@ -110,8 +110,19 @@ export default function ShipmentDetailPage({
       headers: { "content-type": "application/json" },
       body: JSON.stringify(data),
     });
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = `수정 실패 (HTTP ${res.status})`;
+      try {
+        const j = JSON.parse(text) as { error?: string };
+        if (j?.error) msg = j.error;
+      } catch {
+        // 응답이 JSON 이 아닌 경우(라우트 로드 실패 등) status 만 노출
+      }
+      throw new Error(msg);
+    }
     const json = (await res.json()) as DetailResponse;
-    if (!res.ok || !json.success || !json.data) {
+    if (!json.success || !json.data) {
       throw new Error(json.error || "수정 실패");
     }
     setDetail(json.data);
