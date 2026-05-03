@@ -94,6 +94,12 @@ export interface PackExtremePointOptions {
    * 기본: z * 1e8 + y * 1e4 + x  (가장 안쪽-아래-왼쪽 우선)
    */
   scoreFn?: (cand: Candidate) => number;
+  /**
+   * 강제 회전 면 인덱스 (0~5). 지정하면 그 face 만 시도, 다른 face 는 skip.
+   * 묶음 stack(같은 cargoId N≥2)에서 컬럼 정렬을 위해 사용.
+   * 지정한 face 가 allowedFaces 에 없으면 placement 실패.
+   */
+  forceFaceIdx?: number;
 }
 
 /* ============================================================
@@ -232,6 +238,12 @@ export function tryPlaceUnit(
 
   for (const cand of state.candidates) {
     for (const faceIdx of faces) {
+      if (
+        options?.forceFaceIdx !== undefined &&
+        faceIdx !== options.forceFaceIdx
+      ) {
+        continue;
+      }
       const eff = effectiveSizeFace(cargoLike, faceIdx);
 
       if (cand.x + eff.width > spec.innerWidth + EPS) continue;
@@ -314,14 +326,232 @@ export function tryPlaceUnit(
   state.visualCbm +=
     (best.eff.width * best.eff.length * best.eff.height) / 1_000_000;
 
-  // 후보점 갱신
+  // 후보점 갱신 — Crainic-style EP projection (6 corners + projected EPs)
+  // 단순 6 모서리만으로는 빈 공간 일부를 놓침. 각 outer corner 를 인접 surface 로
+  // projection 해서 추가 EP 생성. 학술 reference: Crainic et al. (2008).
   state.candidates = state.candidates.filter((c) => c !== best!.cand);
-  const newCands: Candidate[] = [
-    { x: best.cand.x + best.eff.width, y: best.cand.y, z: best.cand.z },
-    { x: best.cand.x, y: best.cand.y + best.eff.length, z: best.cand.z },
-    { x: best.cand.x, y: best.cand.y, z: best.cand.z + best.eff.height },
+  const bx = best.cand.x;
+  const by = best.cand.y;
+  const bz = best.cand.z;
+  const bw = best.eff.width;
+  const bl = best.eff.length;
+  const bh = best.eff.height;
+
+  // 6 base corners
+  const baseCands: Candidate[] = [
+    { x: bx + bw, y: by, z: bz },
+    { x: bx, y: by + bl, z: bz },
+    { x: bx, y: by, z: bz + bh },
+    { x: bx + bw, y: by + bl, z: bz },
+    { x: bx + bw, y: by, z: bz + bh },
+    { x: bx, y: by + bl, z: bz + bh },
   ];
-  for (const nc of newCands) {
+
+  // Projection helpers — 각 corner 를 한 축 방향으로 인접 surface 까지 projection
+  // 결과: 그 surface 위 anchor 위치 EP 생성
+  const projectMaxY = (px: number, pz: number): number => {
+    let m = 0;
+    for (const p of state.placements) {
+      const py2 = p.position.y + p.size.length;
+      if (py2 > by + EPS) continue; // must be 'in front' of new box (smaller y)
+      // p must contain (px, pz) in its (x,z) range
+      if (px < p.position.x - EPS) continue;
+      if (px > p.position.x + p.size.width + EPS) continue;
+      if (pz < p.position.z - EPS) continue;
+      if (pz > p.position.z + p.size.height + EPS) continue;
+      if (py2 > m) m = py2;
+    }
+    return m;
+  };
+  const projectMaxX = (py: number, pz: number): number => {
+    let m = 0;
+    for (const p of state.placements) {
+      const px2 = p.position.x + p.size.width;
+      if (px2 > bx + EPS) continue;
+      if (py < p.position.y - EPS) continue;
+      if (py > p.position.y + p.size.length + EPS) continue;
+      if (pz < p.position.z - EPS) continue;
+      if (pz > p.position.z + p.size.height + EPS) continue;
+      if (px2 > m) m = px2;
+    }
+    return m;
+  };
+  const projectMaxZ = (px: number, py: number): number => {
+    let m = 0;
+    for (const p of state.placements) {
+      const pz2 = p.position.z + p.size.height;
+      if (pz2 > bz + EPS) continue;
+      if (px < p.position.x - EPS) continue;
+      if (px > p.position.x + p.size.width + EPS) continue;
+      if (py < p.position.y - EPS) continue;
+      if (py > p.position.y + p.size.length + EPS) continue;
+      if (pz2 > m) m = pz2;
+    }
+    return m;
+  };
+
+  // Project each outer corner along 2 perpendicular axes (Crainic 6-EP set)
+  // (x+w, y, z) — outer in +x: project -y and -z
+  // (x, y+l, z) — outer in +y: project -x and -z
+  // (x, y, z+h) — outer in +z: project -x and -y
+  const projCands: Candidate[] = [
+    { x: bx + bw, y: projectMaxY(bx + bw, bz), z: bz },
+    { x: bx + bw, y: by, z: projectMaxZ(bx + bw, by) },
+    { x: projectMaxX(by + bl, bz), y: by + bl, z: bz },
+    { x: bx, y: by + bl, z: projectMaxZ(bx, by + bl) },
+    { x: projectMaxX(by, bz + bh), y: by, z: bz + bh },
+    { x: bx, y: projectMaxY(bx, bz + bh), z: bz + bh },
+  ];
+
+  for (const nc of [...baseCands, ...projCands]) {
+    if (nc.x >= spec.innerWidth - EPS) continue;
+    if (nc.y >= spec.innerLength - EPS) continue;
+    if (nc.z >= spec.innerHeight - EPS) continue;
+    if (nc.x < -EPS || nc.y < -EPS || nc.z < -EPS) continue;
+    const dup = state.candidates.some(
+      (c) =>
+        Math.abs(c.x - nc.x) < EPS &&
+        Math.abs(c.y - nc.y) < EPS &&
+        Math.abs(c.z - nc.z) < EPS,
+    );
+    if (dup) continue;
+    state.candidates.push(nc);
+  }
+  return true;
+}
+
+/**
+ * Brute-force fallback placement — extreme-point candidate set 이 못 찾는 빈 공간을
+ * grid scan 으로 탐색.
+ *
+ * - x/y: 5cm 간격 grid scan
+ * - z: 0 + 모든 기존 placement 의 top z (실제로 stack 가능한 z 레벨만)
+ * - 모든 face 시도
+ * - 정상 tryPlaceUnit 와 동일한 모든 제약 확인 (충돌·지지·중량·도어·rules)
+ * - 성공 시 state mutate (placements 추가, candidates 도 새 corner 들 추가)
+ *
+ * 비용 O(W/5 × L/5 × Z_levels × faces × placements) — 미배치 시에만 호출, 1대당 한 번.
+ */
+export function tryPlaceUnitBruteForce(
+  unit: UnitItem,
+  state: ContainerPackState,
+  spec: ContainerSpec,
+  options?: PackExtremePointOptions,
+): boolean {
+  if (!withinWeightLimit(state.totalWeight, unit.weight, spec)) return false;
+  const cargoLike = asCargoLikeForFace(unit);
+  const faces = allowedFaces(cargoLike);
+  const score =
+    options?.scoreFn ?? ((c: Candidate) => c.z * 1e8 + c.y * 1e4 + c.x);
+  // 5cm grid — fallback 만 호출되므로 비용은 낮지만 정밀도와 trade-off.
+  // 더 정밀한 탐색이 필요하면 STEP=2 로 줄이면 되지만 packBest 14 조합 × 백트래킹 누적되면 ~수십초.
+  const STEP = 5;
+
+  // z 레벨 = 0 + 모든 placement 의 top z (중복 제거)
+  const zLevelSet = new Set<number>([0]);
+  for (const p of state.placements) zLevelSet.add(p.position.z + p.size.height);
+  const zLevels = Array.from(zLevelSet).sort((a, b) => a - b);
+
+  let best: { x: number; y: number; z: number; eff: ReturnType<typeof effectiveSizeFace>; faceIdx: number } | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (const faceIdx of faces) {
+    if (
+      options?.forceFaceIdx !== undefined &&
+      faceIdx !== options.forceFaceIdx
+    )
+      continue;
+    const eff = effectiveSizeFace(cargoLike, faceIdx);
+    if (eff.width > spec.innerWidth + EPS) continue;
+    if (eff.length > spec.innerLength + EPS) continue;
+    if (eff.height > spec.innerHeight + EPS) continue;
+
+    const xMax = spec.innerWidth - eff.width;
+    const yMax = spec.innerLength - eff.length;
+
+    for (const z of zLevels) {
+      if (z + eff.height > spec.innerHeight + EPS) continue;
+      if (unit.remarks.topOnly && z <= EPS) continue;
+
+      for (let x = 0; x <= xMax + EPS; x += STEP) {
+        for (let y = 0; y <= yMax + EPS; y += STEP) {
+          let hit = false;
+          for (const p of state.placements) {
+            if (collides3D(x, y, z, eff.width, eff.length, eff.height, p)) {
+              hit = true;
+              break;
+            }
+          }
+          if (hit) continue;
+
+          if (z > EPS) {
+            const sups = findSupporters(
+              { x, y, z },
+              eff.width,
+              eff.length,
+              state.placements,
+            );
+            if (sups.length === 0) continue;
+            if (!isFullySupported({ x, y, z }, eff.width, eff.length, sups))
+              continue;
+            let stackOk = true;
+            for (const s of sups) {
+              if (!canStackOn(cargoLike, asCargoLikeForStack(s))) {
+                stackOk = false;
+                break;
+              }
+            }
+            if (!stackOk) continue;
+          }
+
+          const sc = score({ x, y, z });
+          if (sc < bestScore) {
+            bestScore = sc;
+            best = { x, y, z, eff, faceIdx };
+          }
+        }
+      }
+    }
+  }
+
+  if (!best) return false;
+
+  const rotated =
+    best.eff.width !== unit.width || best.eff.length !== unit.length;
+  const placed: Placement3D = {
+    unitId: unit.unitId,
+    cargoId: unit.cargoId,
+    shipper: unit.shipper,
+    name: unit.name,
+    cargoType: unit.cargoType,
+    cfsCbm: unit.cfsCbm,
+    position: { x: best.x, y: best.y, z: best.z },
+    size: {
+      width: best.eff.width,
+      length: best.eff.length,
+      height: best.eff.height,
+    },
+    faceIdx: best.faceIdx,
+    rotated,
+    weight: unit.weight,
+    remarks: unit.remarks,
+    layer: best.z <= EPS ? "bottom" : "top",
+  };
+  state.placements.push(placed);
+  state.totalWeight += unit.weight;
+  state.visualCbm +=
+    (best.eff.width * best.eff.length * best.eff.height) / 1_000_000;
+
+  // 후보점도 추가 (다음 unit 이 이 placement 의 corner 들을 활용 가능하도록)
+  const corners: Candidate[] = [
+    { x: best.x + best.eff.width, y: best.y, z: best.z },
+    { x: best.x, y: best.y + best.eff.length, z: best.z },
+    { x: best.x, y: best.y, z: best.z + best.eff.height },
+    { x: best.x + best.eff.width, y: best.y + best.eff.length, z: best.z },
+    { x: best.x + best.eff.width, y: best.y, z: best.z + best.eff.height },
+    { x: best.x, y: best.y + best.eff.length, z: best.z + best.eff.height },
+  ];
+  for (const nc of corners) {
     if (nc.x >= spec.innerWidth - EPS) continue;
     if (nc.y >= spec.innerLength - EPS) continue;
     if (nc.z >= spec.innerHeight - EPS) continue;

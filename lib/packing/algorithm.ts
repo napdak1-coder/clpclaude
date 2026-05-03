@@ -40,8 +40,10 @@ import {
 import {
   makeContainerState,
   tryPlaceUnit,
+  tryPlaceUnitBruteForce,
   type ContainerPackState,
 } from "./extreme-point.ts";
+import { allowedFaces, effectiveSizeFace } from "./constraints.ts";
 import { computeDisplayRows } from "./display-rows.ts";
 
 interface UnitItem {
@@ -72,7 +74,7 @@ interface ContainerState {
   bulkItems: BulkItem[];
 }
 
-const REGULAR_TYPES = new Set(["PL", "WB", "WC", "WD", "CR", "CL"]);
+const REGULAR_TYPES = new Set(["PL", "WB", "WC", "WD", "CR", "CL", "PK"]);
 
 /** cargo CBM 헬퍼 — unitSizes 우선, 없으면 대표 W*L*H*Q */
 function cargoCbm(c: CargoSpec): number {
@@ -165,23 +167,35 @@ interface ClassifiedCargoes {
   completedCargoes: CargoSpec[];
 }
 
+/**
+ * 분류 룰 — **사이즈 우선** (cargoType 라벨보다 사이즈가 우선).
+ *
+ * - W & L & H > 0 (또는 unitSizes 가 모두 양수) → 시각 적재 대상 (cargoType 무관)
+ * - 사이즈 없음 (w/l/h ≤ 0 + unitSizes 도 없거나 비어있음) → CT bulk (CBM 만 합산)
+ *
+ * 즉 cargoType=CT 라도 사이즈가 적혀 있으면 시각화한다 (사용자 룰: "사이즈 적힌 건 다 시각").
+ * 진짜 카톤(사이즈 입력 없이 CBM 만 옴) 만 bulk 로 빠진다.
+ *
+ * REGULAR_TYPES / cargoType 은 화면 라벨/색 구분 등에만 사용.
+ */
 function classify(cargoes: CargoSpec[]): ClassifiedCargoes {
   const visualCargoes: CargoSpec[] = [];
   const ctCargoes: CargoSpec[] = [];
-  const completedCargoes: CargoSpec[] = [];
   for (const c of cargoes) {
-    if (c.cargoType === "CT") {
-      ctCargoes.push(c);
-      continue;
-    }
-    if (REGULAR_TYPES.has(c.cargoType)) {
+    const hasMainSize = c.width > 0 && c.length > 0 && c.height > 0;
+    const hasUnitSizes =
+      c.unitSizes != null &&
+      c.unitSizes.length > 0 &&
+      c.unitSizes.every(
+        (u) => u.width > 0 && u.length > 0 && u.height > 0,
+      );
+    if (hasMainSize || hasUnitSizes) {
       visualCargoes.push(c);
-      continue;
+    } else {
+      ctCargoes.push(c);
     }
-    // 알 수 없는 타입은 안전하게 CT 로 처리 (시각 X)
-    ctCargoes.push(c);
   }
-  return { visualCargoes, ctCargoes, completedCargoes };
+  return { visualCargoes, ctCargoes, completedCargoes: [] };
 }
 
 /**
@@ -422,6 +436,185 @@ export interface PackOptions {
     | "widest"
     | "shortest"
     | "shortest-height";
+  /**
+   * 컨테이너 후보 순서 — 자유 분배 시 어떤 컨테이너를 먼저 시도할지.
+   *  - "biggest-first" (기본): 입력 순서 그대로 (보통 40FT > 20FT)
+   *  - "smallest-first" (best-fit): 작은 컨테이너 우선
+   * packBest 가 양쪽 다 시도해 best 선택.
+   */
+  containerOrder?: "biggest-first" | "smallest-first";
+  /**
+   * 입고완료(cfs cbm 입력된) 화물 자동 마감 모드 — 기본 true.
+   *
+   * true 면 입고완료 화물의 총 CBM 을 한 컨테이너 한도 안에 수용 가능한지 자동 판단해
+   * 그 컨테이너에 입고완료 화물 우선 배치 + 비-입고완료는 다른 컨테이너 우선.
+   * 사용자 명시 옵션(fixedAssignment / completedExclusiveContainerIndex) 이 있으면 그게 우선.
+   *
+   * 예: 사용자 5종 입고완료 23 m³ → 20FT(28 m³)에 자동 마감, 다른 화물은 40FT 로.
+   */
+  autoConsolidateCompleted?: boolean;
+  /**
+   * placeQueue 모드 — 기본 "wrapper".
+   *  - "wrapper" : 클러스터링/버블 stack/sub-bucket/brute-force fallback 모두 적용 (기본)
+   *  - "pure"    : 단순 LDF + tryPlaceUnit. wrapper 가 손해보는 작은 케이스용.
+   * packBest 가 양쪽 다 시도해 best 선택.
+   */
+  placementMode?: "wrapper" | "pure";
+}
+
+/** cm 단위 미세 좌표 비교 — extreme-point 내부 EPS 와 같은 수준이면 충분 */
+const STACK_EPS = 0.01;
+
+/** insertion order 보존하며 cargoId 별 그룹화 */
+function groupByCargoId(units: UnitItem[]): UnitItem[][] {
+  const map = new Map<string, UnitItem[]>();
+  for (const u of units) {
+    let g = map.get(u.cargoId);
+    if (!g) {
+      g = [];
+      map.set(u.cargoId, g);
+    }
+    g.push(u);
+  }
+  return Array.from(map.values());
+}
+
+/** 같은 cargoId 그룹 내 모든 unit 의 (w,l,h) 가 동일한가 — 묶음 stack 전제 */
+function allUnitsSameSize(group: UnitItem[]): boolean {
+  const first = group[0];
+  return group.every(
+    (u) =>
+      u.width === first.width &&
+      u.length === first.length &&
+      u.height === first.height,
+  );
+}
+
+/**
+ * 묶음 stack 용 최적 회전(face) 결정.
+ *  - 컨테이너 (innerWidth, innerLength) 안에 들어가는 face 만
+ *  - eff.height 가 작을수록 더 많이 stack 가능 → maxStack desc, h asc
+ *  - groupSize 보다 더 많이 쌓을 수 있으면 그만큼만 사용 (의미 없는 큰 stack 회피)
+ *  - maxStack < 2 면 묶음 이점이 없으므로 null 반환 (단독 배치가 더 나음)
+ */
+function pickBundleFace(
+  unit: UnitItem,
+  spec: ContainerSpec,
+  groupSize: number,
+): { faceIdx: number; effHeight: number; maxStack: number } | null {
+  const faces = allowedFaces({
+    width: unit.width,
+    length: unit.length,
+    height: unit.height,
+    remarks: unit.remarks,
+  });
+  let best: { faceIdx: number; h: number; maxStack: number } | null = null;
+  for (const faceIdx of faces) {
+    const eff = effectiveSizeFace(unit, faceIdx);
+    if (eff.height <= 0) continue;
+    if (eff.width > spec.innerWidth + STACK_EPS) continue;
+    if (eff.length > spec.innerLength + STACK_EPS) continue;
+    const physicalMax = Math.floor(
+      (spec.innerHeight + STACK_EPS) / eff.height,
+    );
+    const maxStack = Math.min(groupSize, physicalMax);
+    if (maxStack < 2) continue;
+    if (
+      !best ||
+      maxStack > best.maxStack ||
+      (maxStack === best.maxStack && eff.height < best.h)
+    ) {
+      best = { faceIdx, h: eff.height, maxStack };
+    }
+  }
+  return best
+    ? { faceIdx: best.faceIdx, effHeight: best.h, maxStack: best.maxStack }
+    : null;
+}
+
+/**
+ * 같은 cargoId 의 N≥2 unit 을 한 컬럼에 세로 stack 으로 배치 시도.
+ *
+ *  1. 모든 unit (w,l,h) 동일 + groupSize ≥ 2 + noStacking=false 일 때만 진행.
+ *  2. pickBundleFace 가 찾은 회전(face) 으로 첫 unit 배치 — 컨테이너 결정.
+ *     실패 시 face 강제 없는 일반 배치로 fallback (단독 placement).
+ *  3. 두 번째부터 maxStack 까지: anchor 바로 위 (x,y 동일, z=anchor.z+h) 만 허용
+ *     하는 scoreFn + 동일 face 강제. 한 번이라도 실패 시 stack 종료.
+ *  4. 묶음 placement 가 끝난 unit 외의 나머지는 호출자가 자유 배치 fallback.
+ */
+function tryBundleStack(
+  group: UnitItem[],
+  candidates: ContainerState[],
+): { placed: UnitItem[]; remaining: UnitItem[] } {
+  if (group.length < 2 || group[0].remarks.noStacking) {
+    return { placed: [], remaining: group };
+  }
+  if (!allUnitsSameSize(group)) {
+    return { placed: [], remaining: group };
+  }
+  const first = group[0];
+  let host: ContainerState | null = null;
+  let chosenFace: number | null = null;
+  let plannedStack = 0;
+  for (const c of candidates) {
+    const best = pickBundleFace(first, c.spec, group.length);
+    if (best) {
+      if (
+        tryPlaceUnit(first, c.packState, c.spec, {
+          forceFaceIdx: best.faceIdx,
+        })
+      ) {
+        host = c;
+        chosenFace = best.faceIdx;
+        plannedStack = best.maxStack;
+        break;
+      }
+    }
+    // face 강제 실패 또는 후보 없음 → 일반 배치 (단독)
+    if (tryPlaceUnit(first, c.packState, c.spec)) {
+      host = c;
+      chosenFace = null;
+      plannedStack = 1;
+      break;
+    }
+  }
+  if (!host) return { placed: [], remaining: group };
+  let anchor =
+    host.packState.placements[host.packState.placements.length - 1];
+  const placed: UnitItem[] = [first];
+  if (chosenFace === null || plannedStack <= 1) {
+    return { placed, remaining: group.slice(1) };
+  }
+  for (let i = 1; i < plannedStack; i++) {
+    const u = group[i];
+    const targetX = anchor.position.x;
+    const targetY = anchor.position.y;
+    const targetZ = anchor.position.z + anchor.size.height;
+    const scoreFn = (cand: { x: number; y: number; z: number }): number => {
+      const exact =
+        Math.abs(cand.x - targetX) < STACK_EPS &&
+        Math.abs(cand.y - targetY) < STACK_EPS &&
+        Math.abs(cand.z - targetZ) < STACK_EPS;
+      return exact ? 0 : Number.POSITIVE_INFINITY;
+    };
+    if (
+      tryPlaceUnit(u, host.packState, host.spec, {
+        scoreFn,
+        forceFaceIdx: chosenFace,
+      })
+    ) {
+      anchor =
+        host.packState.placements[host.packState.placements.length - 1];
+      placed.push(u);
+    } else {
+      break;
+    }
+  }
+  const placedIds = new Set(placed.map((p) => p.unitId));
+  return {
+    placed,
+    remaining: group.filter((u) => !placedIds.has(u.unitId)),
+  };
 }
 
 /**
@@ -539,8 +732,29 @@ export function pack(
       }
     });
   };
-  const topOnlyUnits = sortBig(allUnits.filter((u) => u.remarks.topOnly));
-  const generalUnits = sortBig(allUnits.filter((u) => !u.remarks.topOnly));
+  // 같은 화주는 인접 배치, 같은 cargoId 는 더 인접 — LDF 우선순위 보존
+  const sortClustered = (units: UnitItem[]): UnitItem[] => {
+    const ldf = sortBig(units);
+    const shipperFirst = new Map<string, number>();
+    const cargoFirst = new Map<string, number>();
+    const ldfRank = new Map<string, number>();
+    ldf.forEach((u, idx) => {
+      if (!shipperFirst.has(u.shipper)) shipperFirst.set(u.shipper, idx);
+      if (!cargoFirst.has(u.cargoId)) cargoFirst.set(u.cargoId, idx);
+      ldfRank.set(u.unitId, idx);
+    });
+    return [...ldf].sort((a, b) => {
+      const sa = shipperFirst.get(a.shipper) ?? 0;
+      const sb = shipperFirst.get(b.shipper) ?? 0;
+      if (sa !== sb) return sa - sb;
+      const ca = cargoFirst.get(a.cargoId) ?? 0;
+      const cb = cargoFirst.get(b.cargoId) ?? 0;
+      if (ca !== cb) return ca - cb;
+      return (ldfRank.get(a.unitId) ?? 0) - (ldfRank.get(b.unitId) ?? 0);
+    });
+  };
+  const topOnlyUnits = sortClustered(allUnits.filter((u) => u.remarks.topOnly));
+  const generalUnits = sortClustered(allUnits.filter((u) => !u.remarks.topOnly));
 
   // 시각 적재 가능 컨테이너 결정 — 옵션상 exclusive 컨에 시각 차단되면 그 컨 제외
   const visualContainers = containers.filter((c) => {
@@ -558,39 +772,222 @@ export function pack(
 
   // 사용자 강제 분배 매핑 — 매핑된 cargoId 는 해당 컨테이너만 후보로 한정
   const fixedMap = options?.fixedAssignment ?? {};
+  // 컨테이너 후보 정렬: options.containerOrder 따라 (기본 = original 순서)
+  const containerOrder = options?.containerOrder ?? "biggest-first";
+  const orderedContainers =
+    containerOrder === "smallest-first"
+      ? [...visualContainers].sort(
+          (a, b) =>
+            a.spec.innerWidth * a.spec.innerLength * a.spec.innerHeight -
+            b.spec.innerWidth * b.spec.innerLength * b.spec.innerHeight,
+        )
+      : visualContainers;
+
+  // 입고완료 자동 마감 — 입고완료 화물(c.cbm 입력) 들의 총 CBM 을 수용 가능한
+  // "가장 작은 컨테이너" 1대 자동 선택해 그 컨에 우선 배치.
+  // 사용자가 fixedAssignment 또는 completedExclusiveContainerIndex 명시했으면 자동 비활성.
+  const autoConsolidate =
+    (options?.autoConsolidateCompleted ?? true) &&
+    Object.keys(fixedMap).length === 0 &&
+    typeof exclusiveIdx !== "number";
+  const completedCargoIds = new Set(
+    visualCargoes
+      .filter((c) => c.cbm != null && c.cbm > 0)
+      .map((c) => c.id),
+  );
+  let autoDesignatedIdx: number | null = null;
+  if (autoConsolidate && completedCargoIds.size > 0 && completedInfoCbm > 0) {
+    const completedWeight = visualCargoes
+      .filter((c) => completedCargoIds.has(c.id))
+      .reduce((s, c) => s + cargoTotalWeight(c), 0);
+    // 작은 컨테이너부터 — 입고완료 CBM/중량 둘 다 수용 가능한 첫 컨
+    const ascByCbm = [...visualContainers].sort(
+      (a, b) => getContainerCbm(a.spec) - getContainerCbm(b.spec),
+    );
+    const fit = ascByCbm.find(
+      (c) =>
+        getContainerCbm(c.spec) >= completedInfoCbm &&
+        c.spec.maxWeightKg >= completedWeight,
+    );
+    if (fit) autoDesignatedIdx = fit.index;
+  }
+
   const candidatesFor = (u: UnitItem): ContainerState[] => {
     const idx = fixedMap[u.cargoId];
     if (typeof idx === "number") {
       const target = visualContainers.find((c) => c.index === idx);
       return target ? [target] : [];
     }
-    return visualContainers;
+    if (autoDesignatedIdx != null) {
+      const designated = visualContainers.find(
+        (c) => c.index === autoDesignatedIdx,
+      );
+      const others = orderedContainers.filter(
+        (c) => c.index !== autoDesignatedIdx,
+      );
+      // 하이브리드 routing — 입고완료 strict + 비-입고완료 마감 컨 fallback 허용
+      // (단 placeQueue 가 입고완료 cargo 를 먼저 처리하므로 5종 자리 보존됨)
+      //   입고완료     → designated 만 (다른 컨 fallback X)
+      //   비-입고완료  → designated 제외 우선, designated fallback 허용 (잉여 공간 활용)
+      if (completedCargoIds.has(u.cargoId)) {
+        return designated ? [designated] : orderedContainers;
+      }
+      return designated ? [...others, designated] : orderedContainers;
+    }
+    return orderedContainers;
   };
 
-  // 일반 화물 — extreme-point 자유 좌표 배치. tryPlaceUnit 이 z=0/stack 모두 시도.
-  for (const u of generalUnits) {
-    const candidates = candidatesFor(u);
-    let placed = false;
-    for (const c of candidates) {
-      if (tryPlaceUnit(u, c.packState, c.spec)) {
-        placed = true;
-        break;
+  // (4) 모드별 placement
+  //   "wrapper" — 클러스터링/묶음 stack/sub-bucket/brute-force fallback 모두 적용
+  //   "pure"    — 단순 LDF + tryPlaceUnit (작은 케이스에서 wrapper 가 손해보는 경우용)
+  const mode_placement = options?.placementMode ?? "wrapper";
+  const placeQueuePure = (queue: UnitItem[]): void => {
+    // Pure 모드는 클러스터링 무시하고 LDF 만 — 작은 케이스에서 wrapper 모드 손해보는 경우용
+    const ldfQueue = sortBig(queue);
+    for (const u of ldfQueue) {
+      const candidates = candidatesFor(u);
+      let placed = false;
+      for (const c of candidates) {
+        if (tryPlaceUnit(u, c.packState, c.spec)) {
+          placed = true;
+          break;
+        }
       }
+      if (!placed) {
+        for (const c of candidates) {
+          if (tryPlaceUnitBruteForce(u, c.packState, c.spec)) {
+            placed = true;
+            break;
+          }
+        }
+      }
+      if (!placed) unplaced.push(u);
     }
-    if (!placed) unplaced.push(u);
-  }
+  };
 
-  // topOnly — 같은 함수 사용하지만 unit.remarks.topOnly 가 z=0 거부 (자동으로 stack 시도만)
-  for (const u of topOnlyUnits) {
-    const candidates = candidatesFor(u);
-    let placed = false;
-    for (const c of candidates) {
-      if (tryPlaceUnit(u, c.packState, c.spec)) {
-        placed = true;
-        break;
+  // (4-wrapper) 묶음 우선 + 자유 배치 fallback
+  //
+  // 순서:
+  //   ① bundle-eligible 그룹(같은 cargoId, 같은 사이즈, qty≥2, !noStacking) 부터 묶음 stack
+  //      → 큰 그룹이 column 자리를 먼저 확보 (예: YKMC 4-stack 118×114 column 보존)
+  //   ② 묶음 실패분 + non-bundleable 그룹 → 일반 LDF placement
+  //   ③ 모두 실패 시 unplaced
+  //
+  // 큰 그룹을 먼저 배치하는 이유: 4-stack 같은 묶음은 한 column 통째로 필요한데,
+  // 그 자리가 작은 화물 부스러기로 차면 묶음을 만들 수 없다.
+  const placeQueueWrapper = (queue: UnitItem[]): void => {
+    // 그룹 분할: 같은 cargoId 안에서도 (w,l,h) 가 다른 unit 이 섞여 있을 수 있다
+    // (unitSizes 케이스). 사이즈별로 sub-bucket 만들어 묶음 적격성 판단.
+    const groups = groupByCargoId(queue);
+    type Bucket = { units: UnitItem[]; bundleEligible: boolean };
+    const buckets: Bucket[] = [];
+    for (const g of groups) {
+      const sizeBuckets = new Map<string, UnitItem[]>();
+      for (const u of g) {
+        const key = `${u.width}x${u.length}x${u.height}`;
+        let b = sizeBuckets.get(key);
+        if (!b) {
+          b = [];
+          sizeBuckets.set(key, b);
+        }
+        b.push(u);
+      }
+      for (const b of sizeBuckets.values()) {
+        buckets.push({
+          units: b,
+          bundleEligible: b.length >= 2 && !b[0].remarks.noStacking,
+        });
       }
     }
-    if (!placed) unplaced.push(u);
+
+    // bucket 들 정렬:
+    //   1순위 — 자동마감 active 시 입고완료 cargo 가 먼저 (designated 컨 자리 선점)
+    //   2순위 — LDF/클러스터 순서 (queue 인덱스)
+    const queueIdx = new Map<string, number>();
+    queue.forEach((u, i) => queueIdx.set(u.unitId, i));
+    buckets.sort((a, b) => {
+      const aCompleted = completedCargoIds.has(a.units[0].cargoId);
+      const bCompleted = completedCargoIds.has(b.units[0].cargoId);
+      if (aCompleted !== bCompleted) {
+        // 자동마감 active 시 입고완료 우선
+        if (autoDesignatedIdx != null) return aCompleted ? -1 : 1;
+      }
+      const ai = Math.min(...a.units.map((u) => queueIdx.get(u.unitId) ?? 0));
+      const bi = Math.min(...b.units.map((u) => queueIdx.get(u.unitId) ?? 0));
+      return ai - bi;
+    });
+
+    const fallbackUnits: UnitItem[] = [];
+
+    // 각 bucket: bundle eligible 이면 multi-column bundle 시도, 아니면 솔로 fallback 큐로
+    for (const bucket of buckets) {
+      if (bucket.bundleEligible) {
+        let remainingGroup = bucket.units;
+        while (remainingGroup.length >= 2) {
+          const result = tryBundleStack(
+            remainingGroup,
+            candidatesFor(remainingGroup[0]),
+          );
+          if (result.placed.length === 0) break;
+          remainingGroup = result.remaining;
+        }
+        for (const u of remainingGroup) fallbackUnits.push(u);
+      } else {
+        for (const u of bucket.units) fallbackUnits.push(u);
+      }
+    }
+
+    // 모든 fallback unit 을 원래 큐 순서대로 정렬 후 배치
+    fallbackUnits.sort(
+      (a, b) => (queueIdx.get(a.unitId) ?? 0) - (queueIdx.get(b.unitId) ?? 0),
+    );
+    for (const u of fallbackUnits) {
+      const candidates = candidatesFor(u);
+      let placed = false;
+      for (const c of candidates) {
+        if (tryPlaceUnit(u, c.packState, c.spec)) {
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        for (const c of candidates) {
+          if (tryPlaceUnitBruteForce(u, c.packState, c.spec)) {
+            placed = true;
+            break;
+          }
+        }
+      }
+      if (!placed) unplaced.push(u);
+    }
+  };
+  // 자동마감 strict 모드 + completed cargoes 존재 시 split-execute:
+  //   입고완료 unit (designated 컨 가는 것) → pure mode (단순 LDF)
+  //   비-입고완료 unit (others 컨 가는 것) → wrapper mode (clustering + bundle)
+  // 두 그룹이 서로 다른 컨테이너로 strict routing 되므로 packing 충돌 없음.
+  // 각 그룹이 독립적으로 자기 컨테이너에 best fit.
+  if (autoDesignatedIdx != null && completedCargoIds.size > 0) {
+    const completedGen = generalUnits.filter((u) =>
+      completedCargoIds.has(u.cargoId),
+    );
+    const otherGen = generalUnits.filter(
+      (u) => !completedCargoIds.has(u.cargoId),
+    );
+    const completedTop = topOnlyUnits.filter((u) =>
+      completedCargoIds.has(u.cargoId),
+    );
+    const otherTop = topOnlyUnits.filter(
+      (u) => !completedCargoIds.has(u.cargoId),
+    );
+    placeQueuePure(completedGen);
+    placeQueueWrapper(otherGen);
+    placeQueuePure(completedTop);
+    placeQueueWrapper(otherTop);
+  } else {
+    const placeQueue =
+      mode_placement === "pure" ? placeQueuePure : placeQueueWrapper;
+    placeQueue(generalUnits);
+    placeQueue(topOnlyUnits);
   }
 
   // 6) CT 화물 CBM → 컨테이너별 남은 여유 CBM 에 합산 (cargo 단위 분할 추적)
@@ -758,18 +1155,68 @@ export function packBest(
 
   const evaluate = (r: CLPResult): number => {
     const unp = r.unplaced.reduce((s, u) => s + (u.quantity ?? 1), 0);
-    return -unp * 100000 + r.summary.avgFillRate;
+    // 입고완료 분리도 보너스 — 입고완료 화물(cfsCbm 입력) 들이 한 컨테이너에 모일수록 +.
+    // 추가: 가장 작은 컨테이너에 모일 때 더 큰 보너스 (마감 컨테이너 정책 우선).
+    const completedContainersMap = new Map<number, ContainerPlan>();
+    for (const c of r.containers) {
+      for (const row of c.rows) {
+        for (const it of [...row.bottomItems, ...row.topItems]) {
+          if (it.cfsCbm != null && it.cfsCbm > 0)
+            completedContainersMap.set(c.index, c);
+        }
+      }
+    }
+    let consolidationBonus = 0;
+    if (completedContainersMap.size === 1) {
+      const target = [...completedContainersMap.values()][0];
+      const targetVol =
+        target.spec.innerWidth * target.spec.innerLength * target.spec.innerHeight;
+      // target 이 모든 컨테이너 중 가장 작은가?
+      const isSmallest = r.containers.every(
+        (o) =>
+          o.index === target.index ||
+          o.spec.innerWidth * o.spec.innerLength * o.spec.innerHeight >=
+            targetVol,
+      );
+      consolidationBonus = isSmallest ? 2000 : 1000;
+    } else if (completedContainersMap.size > 1) {
+      consolidationBonus = -200 * (completedContainersMap.size - 1);
+    }
+    return -unp * 100000 + consolidationBonus + r.summary.avgFillRate;
   };
 
+  const containerOrders: PackOptions["containerOrder"][] = [
+    "biggest-first",
+    "smallest-first",
+  ];
+  const placementModes: PackOptions["placementMode"][] = ["wrapper", "pure"];
+  // 사용자 명시 옵션이 있으면 자동마감은 비활성 모드만 시도 (사용자 옵션 존중)
+  const userPinned =
+    options?.fixedAssignment != null ||
+    typeof options?.completedExclusiveContainerIndex === "number" ||
+    options?.autoConsolidateCompleted === false;
+  const consolidateModes: boolean[] = userPinned ? [false] : [true, false];
   const tryAllStrategies = (input: CargoSpec[]): CLPResult => {
     let best: CLPResult | null = null;
     let bestScore = -Infinity;
     for (const strat of strategies) {
-      const r = pack(input, mode, { ...options, sortStrategy: strat });
-      const score = evaluate(r);
-      if (score > bestScore) {
-        bestScore = score;
-        best = r;
+      for (const co of containerOrders) {
+        for (const consolidate of consolidateModes) {
+          for (const pm of placementModes) {
+            const r = pack(input, mode, {
+              ...options,
+              sortStrategy: strat,
+              containerOrder: co,
+              autoConsolidateCompleted: consolidate,
+              placementMode: pm,
+            });
+            const score = evaluate(r);
+            if (score > bestScore) {
+              bestScore = score;
+              best = r;
+            }
+          }
+        }
       }
     }
     return best ?? pack(input, mode, options);

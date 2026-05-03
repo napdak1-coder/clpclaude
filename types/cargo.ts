@@ -9,14 +9,32 @@ export type Orientation = "free" | "long_along_length" | "fixed";
 /**
  * 화물 종류:
  *  - PL/WB/WC/WD/CR/CL : 정상 화물 (실측 W/L/H 가짐, 컨테이너에 시각적으로 배치)
- *  - CT                : 카톤 (일반 택배박스). 실측 없고 CBM 만 사용 → 알고리즘은
- *                        컨테이너 여유 CBM 에 합산만, 시각화 안 함.
+ *  - PK                : 묶음 화물 (화주가 단위 안 알려줘도 사이즈가 적혀서 옴.
+ *                        WC + 카톤 섞임도 "2PK" 처럼 표기). 실측 있으면 시각 적재 대상.
+ *  - CT                : 사이즈 적히지 않은 카톤. CBM 만 사용 → 컨테이너 여유 CBM 합산만, 시각화 X.
  */
-export type CargoType = "PL" | "WB" | "WC" | "WD" | "CR" | "CL" | "CT";
+export type CargoType =
+  | "PL"
+  | "WB"
+  | "WC"
+  | "WD"
+  | "CR"
+  | "CL"
+  | "PK"
+  | "CT";
 
-export const CARGO_TYPES: CargoType[] = ["PL", "WB", "WC", "WD", "CR", "CL", "CT"];
+export const CARGO_TYPES: CargoType[] = [
+  "PL",
+  "WB",
+  "WC",
+  "WD",
+  "CR",
+  "CL",
+  "PK",
+  "CT",
+];
 
-/** 입력값 정규화 — 화이트리스트 외엔 모두 CT */
+/** 입력값 정규화 — 화이트리스트 외엔 모두 CT (사이즈 미상 카톤으로 처리) */
 export function normalizeCargoType(v: unknown): CargoType {
   if (typeof v !== "string") return "CT";
   const upper = v.trim().toUpperCase();

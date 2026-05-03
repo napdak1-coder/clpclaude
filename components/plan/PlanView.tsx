@@ -3,11 +3,14 @@
 /**
  * 적재 계획 상세 뷰 (클라이언트)
  *
- * - 컨테이너 탭 전환, 행 미세조정 토글, PDF/공유 버튼
+ * - 컨테이너 탭 전환, PDF/공유 버튼
  * - 각 컨테이너에 "이 컨에 입고완료 전용 채우기" 미리보기 기능
  *   - 옵션 패널: 여유 CBM 에 미입고 시각/CT 허용 여부 토글
  *   - 미리보기: 화면 결과만 갱신 (DB 미수정)
  *   - 저장: 새 plan 으로 INSERT 후 그 페이지로 이동
+ *
+ * 행은 자동 계산된다 — 9번 자유 좌표 알고리즘은 컨테이너 전체를 한 덩어리로 packing 하고
+ * 화면의 행 구분선은 보기 편의용 시각 그룹핑일 뿐 사용자 수동 조정 대상이 아니다.
  */
 
 import { useRef, useState } from "react";
@@ -15,7 +18,6 @@ import { useRouter } from "next/navigation";
 import { PlanSummary } from "./PlanSummary";
 import { ContainerView2D } from "./ContainerView2D";
 import { ContainerItemList } from "./ContainerItemList";
-import { RowEditor } from "./RowEditor";
 import { PdfExport } from "@/components/export/PdfExport";
 import { ShareLink } from "@/components/export/ShareLink";
 import type { CLPResult, ContainerMode } from "@/types/plan";
@@ -53,7 +55,6 @@ export function PlanView({
 
   const containerCount = result.containers.length;
   const [activeIdx, setActiveIdx] = useState(0);
-  const [showEditor, setShowEditor] = useState(false);
   const [optionPanelIdx, setOptionPanelIdx] = useState<number | null>(null);
   const [optAllowVisual, setOptAllowVisual] = useState(false);
   const [optAllowCt, setOptAllowCt] = useState(false);
@@ -187,20 +188,15 @@ export function PlanView({
       )}
 
       {!readOnly && (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => setShowEditor((v) => !v)}
-            className={`rounded border px-3 py-1 text-sm ${
-              showEditor
-                ? "border-amber-300 bg-amber-100 text-amber-900"
-                : "border-neutral-300 bg-white"
-            }`}
-          >
-            {showEditor ? "행 수동 조정 닫기" : "행 수동 조정"}
-          </button>
-          <PdfExport targetRef={printAreaRef} fileLabel={fileLabel} />
-          <ShareLink planId={planId} initialToken={shareToken} />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] text-neutral-500">
+            ℹ 행은 자동 계산됩니다 — 화면 위 행 구분선은 보기 편의용일 뿐, 알고리즘은 컨테이너
+            전체를 자유 좌표로 packing 합니다.
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <PdfExport targetRef={printAreaRef} fileLabel={fileLabel} />
+            <ShareLink planId={planId} initialToken={shareToken} />
+          </div>
         </div>
       )}
 
@@ -326,14 +322,8 @@ export function PlanView({
                   </div>
                 )}
 
-                <ContainerView2D plan={active} />
+                <ContainerView2D plan={active} scale={{ x: 1.79, y: 0.385 }} />
                 <ContainerItemList plan={active} />
-                {showEditor && !readOnly && (
-                  <RowEditor
-                    rows={active.rows}
-                    containerLength={active.spec.innerLength}
-                  />
-                )}
               </section>
             )}
           </>

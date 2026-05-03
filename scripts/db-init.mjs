@@ -35,6 +35,9 @@ console.log(`[db-init] target db: ${dbPath}`);
  * 멱등 가능 오류로 분류해 무시할 메시지 키워드
  * - "duplicate column"  : ALTER ADD COLUMN 시 이미 존재
  * - "already exists"    : CREATE TABLE/INDEX 등에서 충돌
+ *
+ * "no such table" 류는 절대 무시하지 않는다 — 실제 버그(잘못된 RENAME, 누락된 DROP)를 가린다.
+ * 마이그레이션은 모든 destructive 단계 앞에 `... IF EXISTS` / `IF NOT EXISTS` 가드를 둘 것.
  */
 const IGNORABLE = ["duplicate column", "already exists"];
 

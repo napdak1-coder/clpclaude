@@ -162,8 +162,8 @@ describe("pack — 중량조건 (heavierBelow)", () => {
   });
 });
 
-describe("pack — 카톤(CT) 분리", () => {
-  it("CT 화물(입고전, aboutCbm 만)은 시각 unit 으로 안 들어가고 ctCbm 에 합산된다", () => {
+describe("pack — 사이즈 우선 분류 (cargoType 보조)", () => {
+  it("사이즈 없는 CT (w=0/l=0/h=0, aboutCbm 만) → 시각 X, ctCbm 에 합산", () => {
     const cargoes = [
       makeCargo({
         id: "regular",
@@ -172,14 +172,13 @@ describe("pack — 카톤(CT) 분리", () => {
         length: 100,
         height: 100,
       }),
-      // CT 카톤 + 입고전 — c.cbm null, aboutCbm 5
-      // (cbm 이 채워지면 입고완료로 우선 분류되므로 입고전 케이스 명시)
+      // 진짜 카톤 — 사이즈 미입력 (W/L/H = 0). DB CHECK 우회한 단위 테스트 입력.
       makeCargo({
         id: "carton",
         cargoType: "CT",
-        width: 50,
-        length: 50,
-        height: 50,
+        width: 0,
+        length: 0,
+        height: 0,
         cbm: undefined,
         aboutCbm: 5,
       }),
@@ -191,12 +190,40 @@ describe("pack — 카톤(CT) 분리", () => {
         c.rows.reduce((rs, r) => rs + r.bottomItems.length + r.topItems.length, 0),
       0,
     );
-    assert.equal(visualUnits, 1, "CT 는 시각 unit 으로 들어가지 않아야 함");
+    assert.equal(visualUnits, 1, "사이즈 없는 CT 는 시각 X (regular 1 개만)");
     assert.ok(
       result.containers[0].ctCbm > 0,
-      `CT 화물 CBM 은 ctCbm 에 합산 (실제 ${result.containers[0].ctCbm})`,
+      `사이즈 없는 CT CBM 은 ctCbm 에 합산 (실제 ${result.containers[0].ctCbm})`,
     );
     assert.equal(result.summary.ctTotalCbm, 5);
+  });
+
+  it("사이즈 있는 CT 는 cargoType 무관 시각 적재 (사이즈 우선 룰)", () => {
+    // 사용자 룰: "사이즈 적힌 건 다 시각". HD현대처럼 CT 로 등록됐어도 사이즈 있으면 시각화.
+    const cargoes = [
+      makeCargo({
+        id: "ct-with-size",
+        cargoType: "CT",
+        width: 100,
+        length: 100,
+        height: 100,
+        quantity: 1,
+        cbm: 1.0,
+      }),
+    ];
+    const result = pack(cargoes, "40ft_only");
+    const visualUnits = result.containers.reduce(
+      (s, c) =>
+        s +
+        c.rows.reduce((rs, r) => rs + r.bottomItems.length + r.topItems.length, 0),
+      0,
+    );
+    assert.equal(visualUnits, 1, "사이즈 있는 CT 도 시각 unit 으로 들어감");
+    assert.equal(
+      result.containers[0].ctCbm,
+      0,
+      "시각으로 들어갔으니 ctCbm bulk 합산 X",
+    );
   });
 });
 
