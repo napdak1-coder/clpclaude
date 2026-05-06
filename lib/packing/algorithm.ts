@@ -702,6 +702,224 @@ function tryBundleStack(
 }
 
 /**
+ * **자리 바꾸기 패스 (Stage 4 reposition)** — 미배치 화물이 있을 때 시도.
+ *
+ * 동작:
+ *  1) 미배치 cargo u 마다, 각 컨테이너 c 마다, 그 안에 배치된 다른 cargo X 마다:
+ *     a) c 의 packState 스냅샷
+ *     b) packState 리셋 후 X 를 제외한 모든 cargo 재배치 (LDF 순)
+ *     c) u 배치 시도 (cargo-atomic)
+ *     d) X 다시 배치 시도 (cargo-atomic, 같은 컨)
+ *     e) 다 성공하면 commit, 아니면 스냅샷 복원
+ *  2) 발동 조건: unplaced > 0 (정상 케이스에선 발동 X)
+ *  3) 점수 합산 X — 단순 lex (성공 했나? 미배치 줄었나?)
+ *  4) fixedAssignment 존중 — 강제 매핑된 cargo 는 evict 후보에서 제외
+ *
+ * 비용: O(미배치 × 컨 × 배치cargo × 평균-replay-cost). 미배치 발생 시만 호출.
+ */
+function repositionUnplaced(
+  containers: ContainerState[],
+  unplaced: UnitItem[],
+  unitsByCargoId: Map<string, UnitItem[]>,
+  fixedMap: Record<string, number>,
+): UnitItem[] {
+  if (unplaced.length === 0) return unplaced;
+
+  const restoreState = (state: ContainerPackState, snap: ContainerPackState): void => {
+    state.placements = snap.placements;
+    state.candidates = snap.candidates;
+    state.totalWeight = snap.totalWeight;
+    state.visualCbm = snap.visualCbm;
+  };
+
+  // 미배치 cargoId 별로 그룹화
+  const unplacedByCargo = new Map<string, UnitItem[]>();
+  for (const u of unplaced) {
+    const list = unplacedByCargo.get(u.cargoId) ?? [];
+    list.push(u);
+    unplacedByCargo.set(u.cargoId, list);
+  }
+
+  const stillUnplaced: UnitItem[] = [];
+
+  // LDF 정렬 (큰 부피부터 시도 — 작은 cargo 가 못 들어가면 큰 게 더 못 들어가므로 우선)
+  const sortLDF = (units: UnitItem[]): UnitItem[] => {
+    return [...units].sort((a, b) => {
+      const va = b.width * b.length * b.height;
+      const vb = a.width * a.length * a.height;
+      return va - vb;
+    });
+  };
+
+  // unplaced cargoId 정렬: 작은 부피부터 (끼우기 쉬운 것부터)
+  const cargoOrder = [...unplacedByCargo.entries()].sort((a, b) => {
+    const va = a[1][0].width * a[1][0].length * a[1][0].height;
+    const vb = b[1][0].width * b[1][0].length * b[1][0].height;
+    return va - vb;
+  });
+
+  for (const [unplacedCid, unplacedUnits] of cargoOrder) {
+    let placed = false;
+
+    // 각 컨테이너 시도 (fixedMap 존중)
+    const eligibleConts = containers.filter((c) => {
+      const f = fixedMap[unplacedCid];
+      return f == null || f === c.index;
+    });
+
+    for (const cont of eligibleConts) {
+      // 이 컨테이너에 배치된 cargoId 들 수집
+      const cargosInCont = new Set<string>();
+      for (const p of cont.packState.placements) cargosInCont.add(p.cargoId);
+      if (cargosInCont.size === 0) continue;
+
+      // evict 후보 우선순위: 미배치 cargo 의 부피가 크면 큰 cargo 먼저, 작으면 작은 cargo 먼저
+      // (큰 cargo 끼우려면 큰 자리 필요 → 큰 cargo evict 가 더 효과)
+      const unplacedVol =
+        unplacedUnits[0].width *
+        unplacedUnits[0].length *
+        unplacedUnits[0].height *
+        unplacedUnits.length;
+      const evictCandidates = [...cargosInCont]
+        .filter((cid) => cid !== unplacedCid)
+        .filter((cid) => {
+          const f = fixedMap[cid];
+          return f == null || f === cont.index;
+        })
+        .sort((a, b) => {
+          const ua = unitsByCargoId.get(a) ?? [];
+          const ub = unitsByCargoId.get(b) ?? [];
+          const va = (ua[0]?.width ?? 0) * (ua[0]?.length ?? 0) * (ua[0]?.height ?? 0) * ua.length;
+          const vb = (ub[0]?.width ?? 0) * (ub[0]?.length ?? 0) * (ub[0]?.height ?? 0) * ub.length;
+          // 미배치 부피와 비슷한 크기를 우선 (절댓값 차이 작은 순)
+          return Math.abs(va - unplacedVol) - Math.abs(vb - unplacedVol);
+        });
+
+      // 단일 evict 시도만 (다중 evict 는 효과 미미 + 비용 큼 — 미사용)
+      const evictTrials: string[][] = evictCandidates.map((cid) => [cid]);
+
+      for (const evictGroup of evictTrials) {
+        const evictSet = new Set(evictGroup);
+        const snap = structuredClone(cont.packState);
+
+        // Step 1: packState 리셋 후 evict 제외 모든 cargo 재배치 (LDF)
+        const replayCargoIds = [...cargosInCont].filter((c) => !evictSet.has(c));
+        const replayUnits = sortLDF(
+          replayCargoIds.flatMap((cid) => unitsByCargoId.get(cid) ?? []),
+        );
+
+        cont.packState = makeContainerState();
+        let allReplayed = true;
+        for (const u of replayUnits) {
+          if (
+            !tryPlaceUnit(u, cont.packState, cont.spec) &&
+            !tryPlaceUnitBruteForce(u, cont.packState, cont.spec)
+          ) {
+            allReplayed = false;
+            break;
+          }
+        }
+        if (!allReplayed) {
+          restoreState(cont.packState, snap);
+          continue;
+        }
+
+        // Step 2: 미배치 cargo 시도 (bundle stack 우선 — column 효율)
+        let unplacedOk = true;
+        if (unplacedUnits.length >= 2 && !unplacedUnits[0].remarks.noStacking) {
+          let remainingGroup = unplacedUnits.slice();
+          while (remainingGroup.length >= 2) {
+            const result = tryBundleStack(remainingGroup, [cont]);
+            if (result.placed.length === 0) break;
+            remainingGroup = result.remaining;
+          }
+          for (const u of remainingGroup) {
+            if (
+              !tryPlaceUnit(u, cont.packState, cont.spec) &&
+              !tryPlaceUnitBruteForce(u, cont.packState, cont.spec)
+            ) {
+              unplacedOk = false;
+              break;
+            }
+          }
+        } else {
+          for (const u of unplacedUnits) {
+            if (
+              !tryPlaceUnit(u, cont.packState, cont.spec) &&
+              !tryPlaceUnitBruteForce(u, cont.packState, cont.spec)
+            ) {
+              unplacedOk = false;
+              break;
+            }
+          }
+        }
+        if (!unplacedOk) {
+          restoreState(cont.packState, snap);
+          continue;
+        }
+
+        // Step 3: evict 된 모든 cargo 다시 배치 (같은 컨, 큰 것부터, bundle stack 우선)
+        let evictOk = true;
+        const evictGroupSorted = [...evictGroup].sort((a, b) => {
+          const ua = unitsByCargoId.get(a) ?? [];
+          const ub = unitsByCargoId.get(b) ?? [];
+          const va = (ua[0]?.width ?? 0) * (ua[0]?.length ?? 0) * (ua[0]?.height ?? 0) * ua.length;
+          const vb = (ub[0]?.width ?? 0) * (ub[0]?.length ?? 0) * (ub[0]?.height ?? 0) * ub.length;
+          return vb - va; // descending — 큰 evict 먼저
+        });
+        for (const eCid of evictGroupSorted) {
+          const evictUnits = unitsByCargoId.get(eCid) ?? [];
+          if (evictUnits.length >= 2 && !evictUnits[0].remarks.noStacking) {
+            let remainingEvict = evictUnits.slice();
+            while (remainingEvict.length >= 2) {
+              const result = tryBundleStack(remainingEvict, [cont]);
+              if (result.placed.length === 0) break;
+              remainingEvict = result.remaining;
+            }
+            for (const u of remainingEvict) {
+              if (
+                !tryPlaceUnit(u, cont.packState, cont.spec) &&
+                !tryPlaceUnitBruteForce(u, cont.packState, cont.spec)
+              ) {
+                evictOk = false;
+                break;
+              }
+            }
+          } else {
+            for (const u of evictUnits) {
+              if (
+                !tryPlaceUnit(u, cont.packState, cont.spec) &&
+                !tryPlaceUnitBruteForce(u, cont.packState, cont.spec)
+              ) {
+                evictOk = false;
+                break;
+              }
+            }
+          }
+          if (!evictOk) break;
+        }
+        if (!evictOk) {
+          restoreState(cont.packState, snap);
+          continue;
+        }
+
+        // SUCCESS
+        placed = true;
+        break;
+      }
+
+      if (placed) break;
+    }
+
+    if (!placed) {
+      stillUnplaced.push(...unplacedUnits);
+    }
+  }
+
+  return stillUnplaced;
+}
+
+/**
  * 메인 진입점.
  * 점수 없이 결정적 룰로 한 번에 패킹.
  */
@@ -1178,6 +1396,25 @@ export function pack(
       mode_placement === "pure" ? placeQueuePure : placeQueueWrapper;
     placeQueue(generalUnits);
     placeQueue(topOnlyUnits);
+  }
+
+  // 5.5) Stage 4 자리 바꾸기 패스 — 미배치 발생 시만 발동
+  //   이미 배치된 cargo 1개 빼서 다시 배치하고 빈 자리에 미배치 cargo 끼우기.
+  //   다중 라운드 — 첫 라운드 진전 시 후속 라운드에서 cascading 배치 시도.
+  if (unplaced.length > 0) {
+    const unitsByCargoId = new Map<string, UnitItem[]>();
+    for (const u of allUnits) {
+      const list = unitsByCargoId.get(u.cargoId) ?? [];
+      list.push(u);
+      unitsByCargoId.set(u.cargoId, list);
+    }
+    let prevCount = unplaced.length + 1;
+    for (let round = 0; round < 5 && unplaced.length > 0 && unplaced.length < prevCount; round++) {
+      prevCount = unplaced.length;
+      const newUnplaced = repositionUnplaced(containers, unplaced, unitsByCargoId, fixedMap);
+      unplaced.length = 0;
+      for (const u of newUnplaced) unplaced.push(u);
+    }
   }
 
   // 6) CT 화물 CBM → 컨테이너별 남은 여유 CBM 에 합산 (cargo 단위 분할 추적)

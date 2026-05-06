@@ -1,7 +1,7 @@
 # clpclaude 분배 알고리즘 파이프라인
 
 > **자동 갱신 룰**: `lib/packing/algorithm.ts` 수정 시 이 파일도 함께 보강할 것 (rule: `keep-algorithm-pipeline-updated`).
-> 마지막 갱신: 2026-05-06 (commit `42d6465`)
+> 마지막 갱신: 2026-05-06 (Stage 1 묶음 완화 + Stage 4 자리 바꾸기 추가)
 
 ---
 
@@ -62,6 +62,20 @@
 3. 그 컨의 packState 스냅샷 → bundle stack + 솔로 fallback 으로 모든 unit 통째 시도
 4. 다 들어가면 commit, **하나라도 실패하면 스냅샷 복원 → 다음 컨 시도**
 5. 어느 컨도 통째 못 받으면 그 cargo 전체 **미배치** 분류 (쪼개기 절대 금지 ✅)
+
+## 5.5단계: 자리 바꾸기 패스 (`repositionUnplaced`)
+
+**파일**: `lib/packing/algorithm.ts:repositionUnplaced`
+
+**발동 조건**: `unplaced.length > 0` (미배치 발생 시만)
+
+- 미배치 cargo 마다 각 컨테이너에서 cargo 1개 빼기 시도
+- 빼면 컨테이너 비우고 나머지 LDF 순으로 재배치
+- 빈 자리에 미배치 cargo 끼우기 (bundle stack 우선)
+- 빠진 cargo 도 다시 끼우기 (같은 컨)
+- 다 들어가면 commit, 하나라도 실패하면 스냅샷 복원
+- 다중 라운드 (최대 5회) — cascading 배치 시도
+- 점수 합산 X — 단순 lex (성공 했나? 미배치 줄었나?)
 
 ## 5단계: 다중 strategy 비교 (`packBest`)
 
