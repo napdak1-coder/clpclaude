@@ -955,46 +955,72 @@ export function pack(
   //   "wrapper" — 클러스터링/묶음 stack/sub-bucket/brute-force fallback 모두 적용
   //   "pure"    — 단순 LDF + tryPlaceUnit (작은 케이스에서 wrapper 가 손해보는 경우용)
   const mode_placement = options?.placementMode ?? "wrapper";
+  // **CBM 쪼개기 절대 금지** (Visual 트랙):
+  // 한 cargoId 의 모든 unit 은 한 컨테이너 안에 통째로 들어가야 한다.
+  // 후보 컨테이너에 packState 스냅샷을 떠 두고, 모든 unit 배치 시도 후
+  // 하나라도 실패하면 스냅샷으로 복원 → 다음 후보로 이동. 어느 후보도
+  // 통째 못 받으면 그 cargo 의 모든 unit 을 unplaced 로 분류.
+  // 통로 A (allocateBulkGroup) 의 안전마진/통째 fit 룰을 통로 B 에도 동일 적용.
+  const restoreState = (state: ContainerPackState, snap: ContainerPackState): void => {
+    state.placements = snap.placements;
+    state.candidates = snap.candidates;
+    state.totalWeight = snap.totalWeight;
+    state.visualCbm = snap.visualCbm;
+  };
   const placeQueuePure = (queue: UnitItem[]): void => {
     // Pure 모드는 클러스터링 무시하고 LDF 만 — 작은 케이스에서 wrapper 모드 손해보는 경우용
     const ldfQueue = sortBig(queue);
+    // cargoId 단위로 묶어서 atomic 배치 (쪼개기 금지)
+    const cargoOrder: string[] = [];
+    const cargoUnits = new Map<string, UnitItem[]>();
     for (const u of ldfQueue) {
-      const candidates = candidatesFor(u);
-      let placed = false;
-      for (const c of candidates) {
-        if (tryPlaceUnit(u, c.packState, c.spec)) {
-          placed = true;
-          break;
-        }
+      if (!cargoUnits.has(u.cargoId)) {
+        cargoUnits.set(u.cargoId, []);
+        cargoOrder.push(u.cargoId);
       }
-      if (!placed) {
-        for (const c of candidates) {
-          if (tryPlaceUnitBruteForce(u, c.packState, c.spec)) {
-            placed = true;
+      cargoUnits.get(u.cargoId)!.push(u);
+    }
+    for (const cid of cargoOrder) {
+      const units = cargoUnits.get(cid)!;
+      const candidates = candidatesFor(units[0]);
+      let placedAll = false;
+      for (const c of candidates) {
+        const snap = structuredClone(c.packState);
+        let allOk = true;
+        for (const u of units) {
+          if (!tryPlaceUnit(u, c.packState, c.spec) &&
+              !tryPlaceUnitBruteForce(u, c.packState, c.spec)) {
+            allOk = false;
             break;
           }
         }
+        if (allOk) {
+          placedAll = true;
+          break;
+        }
+        restoreState(c.packState, snap);
       }
-      if (!placed) unplaced.push(u);
+      if (!placedAll) {
+        for (const u of units) unplaced.push(u);
+      }
     }
   };
 
-  // (4-wrapper) 묶음 우선 + 자유 배치 fallback
+  // (4-wrapper) 묶음 우선 + 자유 배치 fallback — **cargoId-atomic**
   //
-  // 순서:
-  //   ① bundle-eligible 그룹(같은 cargoId, 같은 사이즈, qty≥2, !noStacking) 부터 묶음 stack
-  //      → 큰 그룹이 column 자리를 먼저 확보 (예: YKMC 4-stack 118×114 column 보존)
-  //   ② 묶음 실패분 + non-bundleable 그룹 → 일반 LDF placement
-  //   ③ 모두 실패 시 unplaced
-  //
-  // 큰 그룹을 먼저 배치하는 이유: 4-stack 같은 묶음은 한 column 통째로 필요한데,
-  // 그 자리가 작은 화물 부스러기로 차면 묶음을 만들 수 없다.
+  // 순서 (cargoId 별로 통째 배치):
+  //   ① 같은 cargoId 의 sized-bucket 들을 모음
+  //   ② 후보 컨테이너 우선순위대로 한 컨씩 시도하며 packState 스냅샷
+  //   ③ 그 컨에 모든 unit (bundle stack + 솔로 fallback) 통째로 시도
+  //   ④ 다 들어가면 commit, 하나라도 실패하면 스냅샷으로 복원 → 다음 후보
+  //   ⑤ 어느 후보도 통째 못 받으면 cargo 전체 unplaced (쪼개기 금지)
   const placeQueueWrapper = (queue: UnitItem[]): void => {
     // 그룹 분할: 같은 cargoId 안에서도 (w,l,h) 가 다른 unit 이 섞여 있을 수 있다
     // (unitSizes 케이스). 사이즈별로 sub-bucket 만들어 묶음 적격성 판단.
     const groups = groupByCargoId(queue);
     type Bucket = { units: UnitItem[]; bundleEligible: boolean };
-    const buckets: Bucket[] = [];
+    type CargoGroup = { cargoId: string; buckets: Bucket[]; firstUnit: UnitItem };
+    const cargoGroups: CargoGroup[] = [];
     for (const g of groups) {
       const sizeBuckets = new Map<string, UnitItem[]>();
       for (const u of g) {
@@ -1006,73 +1032,84 @@ export function pack(
         }
         b.push(u);
       }
+      const buckets: Bucket[] = [];
       for (const b of sizeBuckets.values()) {
         buckets.push({
           units: b,
           bundleEligible: b.length >= 2 && !b[0].remarks.noStacking,
         });
       }
+      cargoGroups.push({ cargoId: g[0].cargoId, buckets, firstUnit: g[0] });
     }
 
-    // bucket 들 정렬:
+    // cargo-group 들 정렬:
     //   1순위 — 자동마감 active 시 입고완료 cargo 가 먼저 (designated 컨 자리 선점)
     //   2순위 — LDF/클러스터 순서 (queue 인덱스)
     const queueIdx = new Map<string, number>();
     queue.forEach((u, i) => queueIdx.set(u.unitId, i));
-    buckets.sort((a, b) => {
-      const aCompleted = completedCargoIds.has(a.units[0].cargoId);
-      const bCompleted = completedCargoIds.has(b.units[0].cargoId);
+    cargoGroups.sort((a, b) => {
+      const aCompleted = completedCargoIds.has(a.cargoId);
+      const bCompleted = completedCargoIds.has(b.cargoId);
       if (aCompleted !== bCompleted) {
-        // 자동마감 active 시 입고완료 우선
         if (autoDesignatedIdx != null) return aCompleted ? -1 : 1;
       }
-      const ai = Math.min(...a.units.map((u) => queueIdx.get(u.unitId) ?? 0));
-      const bi = Math.min(...b.units.map((u) => queueIdx.get(u.unitId) ?? 0));
+      const ai = Math.min(
+        ...a.buckets.flatMap((bk) => bk.units.map((u) => queueIdx.get(u.unitId) ?? 0)),
+      );
+      const bi = Math.min(
+        ...b.buckets.flatMap((bk) => bk.units.map((u) => queueIdx.get(u.unitId) ?? 0)),
+      );
       return ai - bi;
     });
 
-    const fallbackUnits: UnitItem[] = [];
+    // cargoId 별 atomic 배치
+    for (const cg of cargoGroups) {
+      const candidates = candidatesFor(cg.firstUnit);
+      let placedAll = false;
+      for (const cand of candidates) {
+        const snap = structuredClone(cand.packState);
+        const candList = [cand]; // 단일 컨테이너로 강제
 
-    // 각 bucket: bundle eligible 이면 multi-column bundle 시도, 아니면 솔로 fallback 큐로
-    for (const bucket of buckets) {
-      if (bucket.bundleEligible) {
-        let remainingGroup = bucket.units;
-        while (remainingGroup.length >= 2) {
-          const result = tryBundleStack(
-            remainingGroup,
-            candidatesFor(remainingGroup[0]),
-          );
-          if (result.placed.length === 0) break;
-          remainingGroup = result.remaining;
+        // bucket 처리: bundle stack → 남은 솔로 → fallback
+        const fallbackUnits: UnitItem[] = [];
+        let allOk = true;
+        for (const bucket of cg.buckets) {
+          if (bucket.bundleEligible) {
+            let remainingGroup = bucket.units;
+            while (remainingGroup.length >= 2) {
+              const result = tryBundleStack(remainingGroup, candList);
+              if (result.placed.length === 0) break;
+              remainingGroup = result.remaining;
+            }
+            for (const u of remainingGroup) fallbackUnits.push(u);
+          } else {
+            for (const u of bucket.units) fallbackUnits.push(u);
+          }
         }
-        for (const u of remainingGroup) fallbackUnits.push(u);
-      } else {
-        for (const u of bucket.units) fallbackUnits.push(u);
-      }
-    }
-
-    // 모든 fallback unit 을 원래 큐 순서대로 정렬 후 배치
-    fallbackUnits.sort(
-      (a, b) => (queueIdx.get(a.unitId) ?? 0) - (queueIdx.get(b.unitId) ?? 0),
-    );
-    for (const u of fallbackUnits) {
-      const candidates = candidatesFor(u);
-      let placed = false;
-      for (const c of candidates) {
-        if (tryPlaceUnit(u, c.packState, c.spec)) {
-          placed = true;
-          break;
-        }
-      }
-      if (!placed) {
-        for (const c of candidates) {
-          if (tryPlaceUnitBruteForce(u, c.packState, c.spec)) {
-            placed = true;
+        // fallback unit — 단일 컨테이너로만 시도
+        fallbackUnits.sort(
+          (a, b) => (queueIdx.get(a.unitId) ?? 0) - (queueIdx.get(b.unitId) ?? 0),
+        );
+        for (const u of fallbackUnits) {
+          if (!tryPlaceUnit(u, cand.packState, cand.spec) &&
+              !tryPlaceUnitBruteForce(u, cand.packState, cand.spec)) {
+            allOk = false;
             break;
           }
         }
+
+        if (allOk) {
+          placedAll = true;
+          break;
+        }
+        restoreState(cand.packState, snap);
       }
-      if (!placed) unplaced.push(u);
+
+      if (!placedAll) {
+        for (const bucket of cg.buckets) {
+          for (const u of bucket.units) unplaced.push(u);
+        }
+      }
     }
   };
   // 자동마감 strict 모드 + completed cargoes 존재 시 split-execute:

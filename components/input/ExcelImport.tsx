@@ -149,6 +149,9 @@ function bookingPatchFromMeta(meta: ExcelMeta): Partial<Record<BookingFieldKey, 
  * 사이즈 매치 1건을 적용해 새 행을 만든다.
  * 단일 사이즈 보충(applyDimension)에서는 base.cbm/unitSizes 를 보존한다.
  * 다중 사이즈로 분리해야 하는 경우엔 호출자가 cbm/unitSizes 를 따로 비운다.
+ *
+ * 수량 규칙: 엑셀 Q'TY 컬럼이 진실원천(SoT). REMARK 의 count("(2)" / "X14") 는
+ * Q'TY 가 비어 있을 때만 폴백으로 사용한다.
  */
 function applyDimension(base: CargoRow, dim: DimensionMatch): CargoRow {
   const next: CargoRow = {
@@ -158,7 +161,7 @@ function applyDimension(base: CargoRow, dim: DimensionMatch): CargoRow {
     lengthCm: dim.length,
     heightCm: dim.height,
   };
-  if (dim.count && dim.count > 0) {
+  if (base.quantity <= 0 && dim.count && dim.count > 0) {
     next.quantity = dim.count;
   }
   return next;
@@ -386,25 +389,32 @@ function buildImportPayload(
       }
     } else {
       // 다중 사이즈 — 행을 분리하지 않고 한 행 안에 unitSizes 로 묶는다.
-      // 대표 사이즈는 첫 번째 사이즈, 수량은 모든 사이즈 합계.
+      // 대표 사이즈는 첫 번째 사이즈.
+      // 수량 규칙: 엑셀 Q'TY 컬럼이 진실원천(SoT). REMARK 사이즈 합계는 폴백.
+      // unitSizes 는 합계가 최종 quantity 와 정확히 일치할 때만 보존
+      // (REMARK 가 일부 사이즈를 누락하면 합계 < Q'TY 가 되어 일관성 깨지므로 생략).
       const first = dims[0];
-      const totalQty = dims.reduce(
+      const sumCounts = dims.reduce(
         (s, d) => s + (d.count && d.count > 0 ? d.count : 1),
         0,
       );
+      const finalQty = base.quantity > 0 ? base.quantity : sumCounts;
+      const unitSizes = sumCounts === finalQty
+        ? dims.map((d) => ({
+            width: d.width,
+            length: d.length,
+            height: d.height,
+            quantity: d.count && d.count > 0 ? d.count : 1,
+            weight: 0,
+          }))
+        : undefined;
       const target: CargoRow = {
         ...base,
         widthCm: first.width,
         lengthCm: first.length,
         heightCm: first.height,
-        quantity: totalQty > 0 ? totalQty : base.quantity,
-        unitSizes: dims.map((d) => ({
-          width: d.width,
-          length: d.length,
-          height: d.height,
-          quantity: d.count && d.count > 0 ? d.count : 1,
-          weight: 0,
-        })),
+        quantity: finalQty,
+        ...(unitSizes ? { unitSizes } : {}),
       };
       if (
         target.widthCm > 0 &&
@@ -449,6 +459,12 @@ const SAMPLE_FILES: Array<{
     label: "1ST HM TOTAL",
     url: "/samples/hochiminh-total.xlsx",
     filename: "호치민 TOTAL 샘플.xlsx",
+  },
+  {
+    key: "hochiminh-total-2",
+    label: "2ST HM TOTAL",
+    url: "/samples/hochiminh-total-2.xlsx",
+    filename: "호치민 TOTAL 두번째.xlsx",
   },
 ];
 
