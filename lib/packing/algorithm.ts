@@ -1220,6 +1220,29 @@ export function pack(
     for (const cid of cargoOrder) {
       const units = cargoUnits.get(cid)!;
       const candidates = candidatesFor(units[0]);
+
+      // **atomic 완화** — 단일 candidate 일 때 cross-container split 위험 X.
+      //   직접 배치, 실패 unit 만 unplaced 처리 (partial OK).
+      if (candidates.length === 1) {
+        const c = candidates[0];
+        let anchor: { x: number; y: number; z: number } | undefined;
+        for (const u of units) {
+          const ok = tryPlaceUnitWithProximity(u, c.packState, c.spec, anchor) ||
+                     tryPlaceUnitBruteForce(u, c.packState, c.spec);
+          if (!ok) {
+            unplaced.push(u);
+          } else if (!anchor) {
+            const lastP = c.packState.placements[c.packState.placements.length - 1];
+            if (lastP) anchor = {
+              x: lastP.position.x,
+              y: lastP.position.y,
+              z: lastP.position.z + lastP.size.height,
+            };
+          }
+        }
+        continue;
+      }
+
       let placedAll = false;
       for (const c of candidates) {
         const snap = structuredClone(c.packState);
@@ -1310,9 +1333,99 @@ export function pack(
       return ai - bi;
     });
 
-    // cargoId 별 atomic 배치
+    // **atomic 완화 + unit-LDF interleave 모드 (fixedAssignment 전용)**:
+    // fixedAssignment 로 컨테이너 강제된 cargo 만 unit-LDF interleave.
+    // autoConsolidate / topOnly routing 같은 자연 single-cand 케이스는 제외 (회귀 방지).
+    // → 사용자 강제 분배에서 cross-container split 위험 X. partial cargo placement 허용.
+    const singleCandPerContainer = new Map<ContainerState, CargoGroup[]>();
+    const multiCandGroups: CargoGroup[] = [];
+    const hasFixed = Object.keys(fixedMap).length > 0;
     for (const cg of cargoGroups) {
+      const cands = candidatesFor(cg.firstUnit);
+      // fixedMap 으로 강제된 cargo 만 unit-LDF 모드 적용
+      if (cands.length === 1 && hasFixed && typeof fixedMap[cg.cargoId] === "number") {
+        const list = singleCandPerContainer.get(cands[0]) ?? [];
+        list.push(cg);
+        singleCandPerContainer.set(cands[0], list);
+      } else {
+        multiCandGroups.push(cg);
+      }
+    }
+    // 컨테이너별 unit-LDF interleave (fixedAssignment 그룹만)
+    for (const [cand, groups] of singleCandPerContainer) {
+      const pool = groups.flatMap((cg) => cg.buckets.flatMap((bk) => bk.units));
+      // tall-first 정렬 — 높은 박스(h≥100) 먼저 자리 잡고 작은 박스가 빈틈 채움
+      // 실험으로 검증: 1ST SG 17 cargo 39 unit 0 미배치 (LDF 만으론 1 미배치)
+      const unitLdf = [...pool].sort((a, b) => {
+        const aTall = a.height >= 100 ? 1 : 0;
+        const bTall = b.height >= 100 ? 1 : 0;
+        if (aTall !== bTall) return bTall - aTall;
+        return (b.width * b.length * b.height) - (a.width * a.length * a.height);
+      });
+      for (const u of unitLdf) {
+        const ok = tryPlaceUnit(u, cand.packState, cand.spec) ||
+                   tryPlaceUnitBruteForce(u, cand.packState, cand.spec);
+        if (!ok) unplaced.push(u);
+      }
+    }
+    // 나머지 cargo 는 기존 atomic 루프로 처리
+    if (multiCandGroups.length === 0) return;
+
+    // cargoId 별 atomic 배치 (multi-cand 만)
+    for (const cg of multiCandGroups) {
       const candidates = candidatesFor(cg.firstUnit);
+
+      // **atomic 완화** — 단일 candidate 케이스는 위에서 처리됨. 여기 안 올 것.
+      if (candidates.length === 1) {
+        const cand = candidates[0];
+        const candList = [cand];
+        // bundle stack — 같은 cargoId 의 column stack 우선
+        const fbUnits: UnitItem[] = [];
+        for (const bucket of cg.buckets) {
+          if (bucket.bundleEligible) {
+            let remaining = bucket.units;
+            while (remaining.length >= 2) {
+              const result = tryBundleStack(remaining, candList);
+              if (result.placed.length === 0) break;
+              remaining = result.remaining;
+            }
+            for (const u of remaining) fbUnits.push(u);
+          } else {
+            for (const u of bucket.units) fbUnits.push(u);
+          }
+        }
+        // 같은 cargoId 의 첫 placement 위 (top z) 를 anchor 로
+        const localAnchor = new Map<string, { x: number; y: number; z: number }>();
+        for (const p of cand.packState.placements) {
+          if (!localAnchor.has(p.cargoId)) {
+            localAnchor.set(p.cargoId, {
+              x: p.position.x,
+              y: p.position.y,
+              z: p.position.z + p.size.height,
+            });
+          }
+        }
+        fbUnits.sort(
+          (a, b) => (queueIdx.get(a.unitId) ?? 0) - (queueIdx.get(b.unitId) ?? 0),
+        );
+        for (const u of fbUnits) {
+          const anchor = localAnchor.get(u.cargoId);
+          const ok = tryPlaceUnitWithProximity(u, cand.packState, cand.spec, anchor) ||
+                     tryPlaceUnitBruteForce(u, cand.packState, cand.spec);
+          if (!ok) {
+            unplaced.push(u);
+          } else if (!anchor) {
+            const lastP = cand.packState.placements[cand.packState.placements.length - 1];
+            if (lastP) localAnchor.set(u.cargoId, {
+              x: lastP.position.x,
+              y: lastP.position.y,
+              z: lastP.position.z + lastP.size.height,
+            });
+          }
+        }
+        continue; // 다음 cargoGroup
+      }
+
       let placedAll = false;
       for (const cand of candidates) {
         const snap = structuredClone(cand.packState);
@@ -1428,6 +1541,99 @@ export function pack(
       const newUnplaced = repositionUnplaced(containers, unplaced, unitsByCargoId, fixedMap);
       unplaced.length = 0;
       for (const u of newUnplaced) unplaced.push(u);
+    }
+  }
+
+  // 5.6) **Rescue repack** — Stage 4 후에도 미배치 남으면 컨테이너 단위로 전체 재배치
+  //   원리: 미배치 cargo 가 있을 때, 해당 cargo 가 가야 할 컨테이너에 이미 배치된 모든 unit
+  //   을 꺼내서 + 미배치 unit 들과 합쳐 unit-LDF 로 재배치 시도.
+  //   - 같은 컨테이너 안에선 cross-container split 위험 X
+  //   - 모든 unit fit 시 commit, 하나라도 fail 시 전체 rollback
+  //   - 미배치 발생 시만 발동 — 기존 PASS 샘플 회귀 X
+  if (unplaced.length > 0) {
+    // 미배치 unit 의 cargoId 별 모음
+    const unplacedByCargo = new Map<string, UnitItem[]>();
+    for (const u of unplaced) {
+      const list = unplacedByCargo.get(u.cargoId) ?? [];
+      list.push(u);
+      unplacedByCargo.set(u.cargoId, list);
+    }
+    // unitsByCargoId 빌드 (allUnits 에서)
+    const unitsByCid = new Map<string, UnitItem[]>();
+    for (const u of allUnits) {
+      const list = unitsByCid.get(u.cargoId) ?? [];
+      list.push(u);
+      unitsByCid.set(u.cargoId, list);
+    }
+    // 각 미배치 cargo 가 어느 컨테이너로 가야 하는지 결정 (fixedMap 우선)
+    const cargoTargetContainer = new Map<string, ContainerState>();
+    for (const cargoId of unplacedByCargo.keys()) {
+      const fix = fixedMap[cargoId];
+      if (typeof fix === "number") {
+        const target = containers.find((c) => c.index === fix);
+        if (target) cargoTargetContainer.set(cargoId, target);
+      }
+      // fixedMap 없으면 — rescue 적용 X (cross-container 위험)
+    }
+    // 컨테이너별로 rescue
+    const targetContainers = new Set<ContainerState>(cargoTargetContainer.values());
+    const stillUnplaced: UnitItem[] = [];
+    const handledCargoIds = new Set<string>();
+    for (const cont of targetContainers) {
+      const snap = structuredClone(cont.packState);
+      // 이 컨테이너에 들어가야 할 cargoId 들 (fixedMap 기준)
+      const targetCargoIds = new Set<string>();
+      for (const [cid] of unplacedByCargo) {
+        if (cargoTargetContainer.get(cid) === cont) {
+          targetCargoIds.add(cid);
+          handledCargoIds.add(cid);
+        }
+      }
+      // 이 컨테이너에 이미 배치된 cargoId 들도 포함
+      for (const p of cont.packState.placements) targetCargoIds.add(p.cargoId);
+      // rescue 대상 unit 풀: 모든 cargoId 의 unit 통합 (중복 제거 자동)
+      // allUnits 순서대로 필터링 (expandToUnits 결과 = 결정적 입력 순서)
+      const pool: UnitItem[] = allUnits.filter((u) => targetCargoIds.has(u.cargoId));
+      if (pool.length === 0) continue;
+      // tall-first 정렬 — 높은 박스(h≥100) 먼저, 그 다음 LDF
+      const ldf = [...pool].sort((a, b) => {
+        const aTall = a.height >= 100 ? 1 : 0;
+        const bTall = b.height >= 100 ? 1 : 0;
+        if (aTall !== bTall) return bTall - aTall;
+        return (b.width * b.length * b.height) - (a.width * a.length * a.height);
+      });
+      // 컨 reset 후 재배치
+      cont.packState = makeContainerState();
+      const localUnplaced: UnitItem[] = [];
+      for (const u of ldf) {
+        const ok = tryPlaceUnit(u, cont.packState, cont.spec) ||
+                   tryPlaceUnitBruteForce(u, cont.packState, cont.spec);
+        if (!ok) localUnplaced.push(u);
+      }
+      // 하나라도 미배치 발생 시 (rescue 가 더 좋아진 경우만 commit)
+      const beforeCount = unplacedByCargo.size === 0 ? 0 :
+        [...unplacedByCargo].filter(([cid]) => cargoTargetContainer.get(cid) === cont).reduce((s, [, us]) => s + us.length, 0);
+      if (localUnplaced.length < beforeCount) {
+        // 개선됨 — commit. 남은 미배치만 stillUnplaced 로
+        for (const u of localUnplaced) stillUnplaced.push(u);
+      } else {
+        // 같거나 악화 — rollback
+        cont.packState = snap;
+        // 원래 미배치 그대로
+        for (const [cid, units] of unplacedByCargo) {
+          if (cargoTargetContainer.get(cid) === cont) {
+            for (const u of units) stillUnplaced.push(u);
+          }
+        }
+      }
+    }
+    // unplaced 갱신: handled cargo 의 잔존 + handled 안 된 (target 못 정한) cargo 의 원본 미배치
+    unplaced.length = 0;
+    for (const u of stillUnplaced) unplaced.push(u);
+    for (const [cid, units] of unplacedByCargo) {
+      if (!handledCargoIds.has(cid)) {
+        for (const u of units) unplaced.push(u);
+      }
     }
   }
 

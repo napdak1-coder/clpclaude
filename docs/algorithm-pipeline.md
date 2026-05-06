@@ -1,7 +1,7 @@
 # clpclaude 분배 알고리즘 파이프라인
 
 > **자동 갱신 룰**: `lib/packing/algorithm.ts` 수정 시 이 파일도 함께 보강할 것 (rule: `keep-algorithm-pipeline-updated`).
-> 마지막 갱신: 2026-05-06 (column-stack 우선화 — 같은 cargoId 후속 unit 은 이전 박스 위에 stack 우선 시도)
+> 마지막 갱신: 2026-05-06 (atomic 완화 + tall-first 정렬 + rescue repack — fixedAssignment 강제 모드에서 unit-LDF interleave 적용, 1ST SG 39/39 fit 달성)
 
 ---
 
