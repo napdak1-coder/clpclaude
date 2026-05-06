@@ -1186,20 +1186,21 @@ export function pack(
     state.visualCbm = snap.visualCbm;
   };
 
-  // **묶음 완화 룰 (인접 lane)**:
+  // **묶음 완화 룰 (column stack 우선화)**:
   // 같은 cargoId 의 unit 이 한 column 에 못 쌓이고 fallback 으로 갈 때,
-  // 이미 배치된 같은 cargoId placement 와 가까운 extreme point 우선 시도.
-  // 효과: 같은 화주 박스가 멀리 흩어지지 않고 인접 행/lane 에 모여 배치됨.
+  // 이미 배치된 같은 cargoId placement 의 **위 (top z)** 좌표를 우선 시도.
+  // 못 올리면 그 다음으로 anchor 옆자리 시도.
+  // 효과: 같은 화주 박스가 옆으로 펼쳐지지 않고 위로 column stack 우선됨.
   const tryPlaceUnitWithProximity = (
     u: UnitItem,
     state: ContainerPackState,
     spec: ContainerSpec,
-    anchor: { x: number; y: number } | undefined,
+    anchor: { x: number; y: number; z: number } | undefined,
   ): boolean => {
     if (!anchor) return tryPlaceUnit(u, state, spec);
-    // anchor 와 가까운 extreme point 선호 (Manhattan 거리)
+    // anchor (이전 박스 위) 와 가까운 extreme point 선호 (Manhattan 3D 거리)
     const scoreFn = (c: { x: number; y: number; z: number }): number => {
-      return Math.abs(c.x - anchor.x) + Math.abs(c.y - anchor.y);
+      return Math.abs(c.x - anchor.x) + Math.abs(c.y - anchor.y) + Math.abs(c.z - anchor.z);
     };
     return tryPlaceUnit(u, state, spec, { scoreFn });
   };
@@ -1223,9 +1224,9 @@ export function pack(
       for (const c of candidates) {
         const snap = structuredClone(c.packState);
         let allOk = true;
-        let anchor: { x: number; y: number } | undefined;
+        let anchor: { x: number; y: number; z: number } | undefined;
         for (const u of units) {
-          // 묶음 완화 — 같은 cargoId 의 첫 unit 위치를 anchor 로 잡고 다음 unit 은 그 근처
+          // 묶음 완화 — 같은 cargoId 의 첫 unit 위 (top z) 를 anchor 로 잡아 column stack 우선
           const ok = tryPlaceUnitWithProximity(u, c.packState, c.spec, anchor) ||
                      tryPlaceUnitBruteForce(u, c.packState, c.spec);
           if (!ok) {
@@ -1234,7 +1235,11 @@ export function pack(
           }
           if (!anchor) {
             const lastP = c.packState.placements[c.packState.placements.length - 1];
-            if (lastP) anchor = { x: lastP.position.x, y: lastP.position.y };
+            if (lastP) anchor = {
+              x: lastP.position.x,
+              y: lastP.position.y,
+              z: lastP.position.z + lastP.size.height,
+            };
           }
         }
         if (allOk) {
@@ -1334,11 +1339,16 @@ export function pack(
         fallbackUnits.sort(
           (a, b) => (queueIdx.get(a.unitId) ?? 0) - (queueIdx.get(b.unitId) ?? 0),
         );
-        // 같은 cargoId 의 첫 placement 위치를 anchor 로 (bundle 결과 포함)
-        const cargoAnchor = new Map<string, { x: number; y: number }>();
+        // 같은 cargoId 의 첫 placement 위 (top z) 를 anchor 로 (bundle 결과 포함)
+        // 효과: 후속 unit 이 이전 박스 위 (column stack) 우선 시도
+        const cargoAnchor = new Map<string, { x: number; y: number; z: number }>();
         for (const p of cand.packState.placements) {
           if (!cargoAnchor.has(p.cargoId)) {
-            cargoAnchor.set(p.cargoId, { x: p.position.x, y: p.position.y });
+            cargoAnchor.set(p.cargoId, {
+              x: p.position.x,
+              y: p.position.y,
+              z: p.position.z + p.size.height,
+            });
           }
         }
         for (const u of fallbackUnits) {
@@ -1351,7 +1361,11 @@ export function pack(
           }
           if (!anchor) {
             const lastP = cand.packState.placements[cand.packState.placements.length - 1];
-            if (lastP) cargoAnchor.set(u.cargoId, { x: lastP.position.x, y: lastP.position.y });
+            if (lastP) cargoAnchor.set(u.cargoId, {
+              x: lastP.position.x,
+              y: lastP.position.y,
+              z: lastP.position.z + lastP.size.height,
+            });
           }
         }
 
