@@ -21,8 +21,9 @@ function fmtNumber(n: number, digits = 2): string {
 
 export function PlanSummary({ result }: PlanSummaryProps) {
   const { summary, unplaced } = result;
-  const totalCbmAll =
-    summary.totalCbm + summary.ctTotalCbm + summary.completedTotalCbm;
+  // completedTotalCbm 은 시각 cargoes 중 입고완료 표시 화물의 CFS CBM 합 — 정보용.
+  // totalCbm 에 이미 해당 cargoes 의 cargoCbm 이 포함돼있어 별도 합산하면 이중 카운트.
+  const totalCbmAll = summary.totalCbm + summary.ctTotalCbm;
   // 입고완료가 있으면 단독 카드로 강조 (사용자 추적성)
   const showCompletedCard = summary.completedTotalCbm > 0;
   return (
@@ -32,7 +33,7 @@ export function PlanSummary({ result }: PlanSummaryProps) {
         <Card label="40FT" value={`${summary.count40FT}대`} />
         <Card label="총 중량" value={`${fmtNumber(summary.totalWeight, 1)} kg`} />
         <Card
-          label="총 CBM (시각+CT+완료)"
+          label="총 CBM (시각+CT)"
           value={`${fmtNumber(totalCbmAll, 3)} CBM`}
           sub={
             summary.ctTotalCbm > 0 || summary.completedTotalCbm > 0
@@ -90,7 +91,7 @@ export function PlanSummary({ result }: PlanSummaryProps) {
                   </th>
                   <th className="px-2 py-1 text-right font-medium">수량</th>
                   <th className="px-2 py-1 text-right font-medium">시스템 CBM</th>
-                  <th className="px-2 py-1 text-right font-medium">엑셀 CBM</th>
+                  <th className="px-2 py-1 text-right font-medium">CFS CBM(입고완료)</th>
                   <th
                     className="px-2 py-1 text-right font-medium"
                     title="이 cargo 에서 컨테이너에 못 들어간 분량"

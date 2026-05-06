@@ -25,6 +25,12 @@ export interface CargoRow {
   sortOrder?: number;
   /** 화물 종류 — PL/WB/WC/WD/CR/CL = 정상, CT = 카톤(시각화 제외) */
   cargoType: CargoType;
+  /** 부킹 번호 — 같은 booking 화물 묶음 배치용 */
+  bookingNo: string;
+  /** House B/L (포워더 발행) — cargo 단위 */
+  houseBlNo: string;
+  /** DEST(목적지) — cargo 단위 */
+  destination: string;
   itemName: string;
   /** 화물 라인별 실화주 (콘솔 케이스에서 행마다 다름) */
   actualShipperName: string;
@@ -57,6 +63,9 @@ export function makeEmptyRow(): CargoRow {
   return {
     rowKey: crypto.randomUUID(),
     cargoType: "CT",
+    bookingNo: "",
+    houseBlNo: "",
+    destination: "",
     itemName: "",
     actualShipperName: "",
     shipperName: "",
@@ -110,10 +119,10 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
       heavierBelow: remark.heavierBelow,
     });
 
-  // 17컬럼: # / 품목 / 실화주 / 화주 / 구분 / 가로 / 세로 / 높이 / 수량 / 중량 / 엑셀CBM / ABOUT / 시스템CBM / 사이즈 / 리마크 / 메모 / 삭제
+  // 20컬럼: # / HBL / DEST / 부킹 / 품목 / 실화주 / 화주 / 구분 / 가로 / 세로 / 높이 / 수량 / 중량 / CFS / ABOUT / 시스템 / 사이즈 / 리마크 / 메모 / 삭제
   // 화주 숨김은 컬럼 폭 변경이 아닌 시각적 모자이크(blur) 로 처리 — 레이아웃 그대로.
-  const colWidths = ["3%", "7%", "7%", "7%", "4%", "4%", "4%", "4%", "3%", "5%", "5%", "5%", "5%", "5%", "9%", "20%", "3%"];
-  const visibleColCount = 17;
+  const colWidths = ["1.5%", "6%", "8.5%", "6%", "2%", "8%", "7%", "2.5%", "3%", "3%", "3%", "2.5%", "4%", "5%", "4%", "5%", "3%", "8%", "16.5%", "1.5%"];
+  const visibleColCount = 20;
   // 모자이크 클래스 — 입력 값과 placeholder 가 흐려지고 클릭/포커스도 차단해 옆사람이 읽지 못하게.
   const shipperMaskCls = hideShippers
     ? "pointer-events-none select-none [filter:blur(5px)]"
@@ -182,25 +191,28 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
             <col key={i} style={{ width: w }} />
           ))}
         </colgroup>
-        <thead className="bg-neutral-50 text-[11px] text-neutral-700">
+        <thead className="bg-neutral-50 text-[11px] leading-none text-neutral-700">
           <tr>
-            <th className="px-1 py-1 text-center text-neutral-500">#</th>
-            <th className="px-1 py-1 text-left">품목명</th>
-            <th className="px-1 py-1 text-left">실화주</th>
-            <th className="px-1 py-1 text-left">화주</th>
-            <th className="px-0.5 py-1 text-center">구분</th>
-            <th className="px-0.5 py-1 text-right">가로</th>
-            <th className="px-0.5 py-1 text-right">세로</th>
-            <th className="px-0.5 py-1 text-right">높이</th>
-            <th className="px-0.5 py-1 text-right">수량</th>
-            <th className="px-0.5 py-1 text-right">중량</th>
-            <th className="px-0.5 py-1 text-right">엑셀CBM</th>
-            <th className="px-0.5 py-1 text-right">ABOUT</th>
-            <th className="px-0.5 py-1 text-right">시스템CBM</th>
-            <th className="px-0.5 py-1 text-center">사이즈</th>
-            <th className="px-1 py-1 text-left">리마크</th>
-            <th className="px-1 py-1 text-left">메모</th>
-            <th className="px-0.5 py-1"></th>
+            <th className="px-0 py-1 text-center text-neutral-500">#</th>
+            <th className="px-0 py-1 text-left">House B/L</th>
+            <th className="px-0 py-1 text-left">DEST</th>
+            <th className="px-0 py-1 text-left">Booking No</th>
+            <th className="px-0 py-1 text-left">품목명</th>
+            <th className="px-0 py-1 text-left">실화주</th>
+            <th className="px-0 py-1 text-left">화주</th>
+            <th className="px-0 py-1 text-center">구분</th>
+            <th className="px-0 py-1 text-right">가로</th>
+            <th className="px-0 py-1 text-right">세로</th>
+            <th className="px-0 py-1 text-right">높이</th>
+            <th className="px-0 py-1 text-right">수량</th>
+            <th className="px-0 py-1 text-right">중량</th>
+            <th className="px-0 py-1 text-right">CFS CBM(입고완료)</th>
+            <th className="px-0 py-1 text-right">ABOUT</th>
+            <th className="px-0 py-1 text-right">시스템CBM</th>
+            <th className="px-0 py-1 text-center">사이즈</th>
+            <th className="px-0 py-1 text-left">리마크</th>
+            <th className="px-0 py-1 text-left">메모</th>
+            <th className="px-0 py-1"></th>
           </tr>
         </thead>
         <tbody>
@@ -230,22 +242,55 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
               const cbmMismatch = cbmDiff != null && cbmDiff > 0.01;
               return (
                 <Fragment key={r.rowKey}>
-                <tr className="border-t border-neutral-200 align-top">
-                  <td className="px-1 py-0.5 text-center text-[11px] text-neutral-500">
+                <tr className="border-t border-neutral-200 align-middle leading-none">
+                  <td className="px-0 py-0.5 text-center text-[11px] text-neutral-500">
                     {idx + 1}
                   </td>
-                  <td className="px-1 py-0.5">
+                  <td className="px-0 py-0.5">
+                    <input
+                      type="text"
+                      value={r.houseBlNo}
+                      onChange={(e) =>
+                        updateRow(r.rowKey, { houseBlNo: e.target.value })
+                      }
+                      className="block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 font-mono text-[11px] leading-tight"
+                      placeholder="House B/L"
+                    />
+                  </td>
+                  <td className="px-0 py-0.5">
+                    <input
+                      type="text"
+                      value={r.destination}
+                      onChange={(e) =>
+                        updateRow(r.rowKey, { destination: e.target.value })
+                      }
+                      className="block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 text-[11px] leading-tight"
+                      placeholder="DEST"
+                    />
+                  </td>
+                  <td className="px-0 py-0.5">
+                    <input
+                      type="text"
+                      value={r.bookingNo}
+                      onChange={(e) =>
+                        updateRow(r.rowKey, { bookingNo: e.target.value })
+                      }
+                      className="block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 font-mono text-[11px] leading-tight"
+                      placeholder="Booking No"
+                    />
+                  </td>
+                  <td className="px-0 py-0.5">
                     <input
                       type="text"
                       value={r.itemName}
                       onChange={(e) =>
                         updateRow(r.rowKey, { itemName: e.target.value })
                       }
-                      className="w-full min-w-0 rounded border border-neutral-300 px-1 py-px"
+                      className="block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 text-[11px] leading-tight"
                       placeholder="품목"
                     />
                   </td>
-                  <td className="px-1 py-0.5">
+                  <td className="px-0 py-0.5">
                     <input
                       type="text"
                       value={r.actualShipperName}
@@ -254,23 +299,23 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                           actualShipperName: e.target.value,
                         })
                       }
-                      className={`w-full min-w-0 rounded border border-neutral-300 px-1 py-px ${shipperMaskCls}`}
+                      className={`block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 text-[11px] leading-tight ${shipperMaskCls}`}
                       placeholder="실화주"
                     />
                   </td>
-                  <td className="px-1 py-0.5">
+                  <td className="px-0 py-0.5">
                     <input
                       type="text"
                       value={r.shipperName}
                       onChange={(e) =>
                         updateRow(r.rowKey, { shipperName: e.target.value })
                       }
-                      className={`w-full min-w-0 rounded border border-neutral-300 px-1 py-px ${shipperMaskCls}`}
+                      className={`block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 text-[11px] leading-tight ${shipperMaskCls}`}
                       placeholder="화주"
                     />
                   </td>
                   {/* 구분 — 화물 종류. CT 면 시각화 제외, CBM 만 합산 */}
-                  <td className="px-0.5 py-0.5">
+                  <td className="px-0 py-0.5">
                     <select
                       value={r.cargoType}
                       onChange={(e) =>
@@ -278,7 +323,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                           cargoType: e.target.value as CargoType,
                         })
                       }
-                      className={`w-full min-w-0 rounded border px-0.5 py-px text-[11px] ${
+                      className={`block w-full min-w-0 rounded border px-0.5 py-0 text-[11px] leading-tight ${
                         r.cargoType === "CT"
                           ? "border-amber-300 bg-amber-50 text-amber-800"
                           : "border-neutral-300"
@@ -305,7 +350,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                       "weightPerUnitKg",
                     ] as const
                   ).map((field) => (
-                    <td key={field} className="px-0.5 py-0.5">
+                    <td key={field} className="px-0 py-0.5">
                       <input
                         type="number"
                         min={0}
@@ -317,12 +362,12 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                             [field]: Number.isFinite(num) ? num : 0,
                           } as Partial<CargoRow>);
                         }}
-                        className="w-full min-w-0 rounded border border-neutral-300 px-0.5 py-px text-right"
+                        className="block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 text-right text-[11px] leading-tight"
                       />
                     </td>
                   ))}
                   {/* 엑셀 CBM — 자동 계산 없음. 빈 칸(null)이면 파싱 실패로 간주, 행마다 ⚠ 표시 */}
-                  <td className="px-0.5 py-0.5">
+                  <td className="px-0 py-0.5">
                     <div className="flex items-center gap-0.5">
                       <input
                         type="number"
@@ -341,7 +386,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                             cbm: Number.isFinite(num) ? num : null,
                           });
                         }}
-                        className={`w-full min-w-0 rounded border px-0.5 py-px text-right ${
+                        className={`block w-full min-w-0 rounded border px-0.5 py-0 text-right text-[11px] leading-tight ${
                           r.cbm == null
                             ? "border-amber-400 bg-amber-50"
                             : "border-neutral-300"
@@ -351,7 +396,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                         <span
                           className="cursor-help text-[11px] text-amber-600"
                           title="엑셀 CFS CBM 비어있음 — ABOUT 또는 시스템 CBM 사용. 직접 입력 가능."
-                          aria-label="엑셀 CBM 파싱 실패"
+                          aria-label="CFS CBM(입고완료) 파싱 실패"
                         >
                           ⚠
                         </span>
@@ -359,7 +404,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                     </div>
                   </td>
                   {/* ABOUT — 엑셀 ABOUT 셀에서 파싱한 값 (CFS CBM 폴백) */}
-                  <td className="px-0.5 py-0.5">
+                  <td className="px-0 py-0.5">
                     <input
                       type="number"
                       step="any"
@@ -377,12 +422,12 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                           aboutCbm: Number.isFinite(num) ? num : null,
                         });
                       }}
-                      className="w-full min-w-0 rounded border border-neutral-300 px-0.5 py-px text-right"
+                      className="block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 text-right text-[11px] leading-tight"
                     />
                   </td>
                   {/* 시스템 CBM — 읽기 전용 표시. 기준 CBM 과 0.01 초과 차이면 빨간색 강조 */}
                   <td
-                    className={`px-0.5 py-0.5 text-right ${
+                    className={`px-0 py-0.5 text-right text-[11px] ${
                       cbmMismatch ? "text-red-600 font-semibold" : "text-neutral-700"
                     }`}
                   >
@@ -403,11 +448,11 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                     </div>
                   </td>
                   {/* 사이즈 버튼 */}
-                  <td className="px-0.5 py-0.5 text-center">
+                  <td className="px-0 py-0.5 text-center">
                     <button
                       type="button"
                       onClick={() => setSizeModalRowKey(r.rowKey)}
-                      className={`rounded border px-1 py-px text-[11px] leading-tight ${
+                      className={`rounded border px-0.5 py-0 text-[11px] leading-none ${
                         hasUnitSizes
                           ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
                           : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
@@ -417,29 +462,29 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                       사이즈
                     </button>
                   </td>
-                  <td className="px-1 py-0.5">
+                  <td className="px-0 py-0.5">
                     <RemarksEditor
                       value={remark}
                       onChange={(next) => updateRemarks(r.rowKey, next)}
                       compact
                     />
                   </td>
-                  <td className="px-1 py-0.5">
+                  <td className="px-0 py-0.5">
                     <textarea
                       value={r.itemRemark}
                       onChange={(e) =>
                         updateRow(r.rowKey, { itemRemark: e.target.value })
                       }
-                      rows={2}
-                      className="w-full min-w-0 resize-y rounded border border-neutral-300 px-1 py-0.5 text-[11px] leading-tight whitespace-pre-wrap break-words"
+                      rows={1}
+                      className="block w-full min-w-0 resize-y rounded border border-neutral-300 px-0.5 py-0 text-[11px] leading-tight whitespace-pre-wrap break-words"
                       placeholder="REMARK 원문"
                     />
                   </td>
-                  <td className="px-0.5 py-0.5 text-right">
+                  <td className="px-0 py-0.5 text-right">
                     <button
                       type="button"
                       onClick={() => removeRow(r.rowKey)}
-                      className="rounded px-1 py-px text-[11px] leading-tight text-red-600 hover:bg-red-50"
+                      className="rounded px-0.5 py-0 text-[11px] leading-none text-red-600 hover:bg-red-50"
                       title="삭제"
                     >
                       ✕

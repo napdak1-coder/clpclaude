@@ -40,6 +40,8 @@ export interface UnitItem {
   unitId: string;
   cargoId: string;
   shipper: string;
+  /** 부킹 번호 (House B/L) — 같은 booking 화물을 컨테이너 안에서 인접 배치하는 데 사용 */
+  bookingNo?: string;
   name?: string;
   cargoType: CargoType;
   /** 사용자 입력 CFS CBM (cargo.cbm). 그룹 내 모든 unit 동일값. */
@@ -57,6 +59,8 @@ export interface Placement3D {
   unitId: string;
   cargoId: string;
   shipper: string;
+  /** 부킹 번호 (House B/L) — 화면 시각화·인접 검증용 */
+  bookingNo?: string;
   name?: string;
   cargoType: CargoType;
   cfsCbm: number | null;
@@ -225,16 +229,72 @@ export function tryPlaceUnit(
 
   const cargoLike = asCargoLikeForFace(unit);
   const faces = allowedFaces(cargoLike);
-  const score =
-    options?.scoreFn ?? ((c: Candidate) => c.z * 1e8 + c.y * 1e4 + c.x);
 
+  // 후보 좌표 선택 룰 (점수 없이 명시적 우선순위 비교):
+  //   1순위 — 낮은 z (바닥부터 차곡차곡)
+  //   2순위 — 낮은 "효과적 y" = y + min(같은 booking 까지 거리, 200cm) × BOOKING_PULL
+  //           BOOKING_PULL = 2.5 → booking 인접 1cm = y 2.5cm 안쪽과 등가
+  //   3순위 — 낮은 x (왼쪽부터)
+  //
+  // 이전엔 score = z*1e8 + y*1e4 + x + min(dist,200)*25000 합산점수 비교였으나,
+  // 가중치(1e8 ≫ 1e4 ≫ 1)가 극단적이라 lexicographic 우선순위와 수학적 동치.
+  // 명시적 룰로 표현해 매직넘버 제거 + 의도 명확화.
+  const BOOKING_CAP_CM = 200;
+  const BOOKING_PULL = 2.5; // booking 인접 가중치 (y 단위 기준)
+
+  const bookingDistFor = (
+    cand: Candidate,
+    eff: { width: number; length: number; height: number },
+  ): number => {
+    if (!unit.bookingNo) return Infinity; // booking 없으면 인접 효과 무관
+    let minDist = Infinity;
+    const newCx = cand.x + eff.width / 2;
+    const newCy = cand.y + eff.length / 2;
+    const newCz = cand.z + eff.height / 2;
+    for (const p of state.placements) {
+      if (p.bookingNo !== unit.bookingNo) continue;
+      const cx = p.position.x + p.size.width / 2;
+      const cy = p.position.y + p.size.length / 2;
+      const cz = p.position.z + p.size.height / 2;
+      const d =
+        Math.abs(newCx - cx) + Math.abs(newCy - cy) + Math.abs(newCz - cz);
+      if (d < minDist) minDist = d;
+    }
+    return minDist;
+  };
+
+  // 룰 우선순위 비교 — a 가 b 보다 더 좋은 후보면 true
   interface Choice {
     cand: Candidate;
     eff: { width: number; length: number; height: number };
     faceIdx: number;
+    bookingDist: number;
   }
+  const isBetterChoice = (a: Choice, b: Choice): boolean => {
+    // Rule 1: 낮은 z 우선
+    if (a.cand.z !== b.cand.z) return a.cand.z < b.cand.z;
+    // Rule 2: 낮은 효과적 y 우선 (y + booking 거리 보정)
+    const aEffY =
+      a.cand.y +
+      (Number.isFinite(a.bookingDist)
+        ? Math.min(a.bookingDist, BOOKING_CAP_CM) * BOOKING_PULL
+        : 0);
+    const bEffY =
+      b.cand.y +
+      (Number.isFinite(b.bookingDist)
+        ? Math.min(b.bookingDist, BOOKING_CAP_CM) * BOOKING_PULL
+        : 0);
+    if (aEffY !== bEffY) return aEffY < bEffY;
+    // Rule 3: 낮은 x 우선
+    return a.cand.x < b.cand.x;
+  };
+
+  // 외부에서 명시적으로 scoreFn 을 넘긴 경우만 legacy 점수 비교 경로 사용
+  // (현재 algorithm.ts 의 bundle stack 강제 위치 매칭에서만 사용 — score=0/Infinity 필터)
+  const legacyScoreFn = options?.scoreFn;
+
   let best: Choice | null = null;
-  let bestScore = Number.POSITIVE_INFINITY;
+  let bestLegacyScore = Number.POSITIVE_INFINITY;
 
   for (const cand of state.candidates) {
     for (const faceIdx of faces) {
@@ -291,10 +351,24 @@ export function tryPlaceUnit(
         if (!stackOk) continue;
       }
 
-      const sc = score(cand);
-      if (sc < bestScore) {
-        bestScore = sc;
-        best = { cand, eff, faceIdx };
+      const candidate: Choice = {
+        cand,
+        eff,
+        faceIdx,
+        bookingDist: bookingDistFor(cand, eff),
+      };
+      if (legacyScoreFn) {
+        // legacy: 외부 scoreFn 사용 (bundle stack 강제 위치 매칭용)
+        const sc = legacyScoreFn(cand);
+        if (sc < bestLegacyScore) {
+          bestLegacyScore = sc;
+          best = candidate;
+        }
+      } else {
+        // 기본: 명시적 룰 우선순위 비교
+        if (best === null || isBetterChoice(candidate, best)) {
+          best = candidate;
+        }
       }
     }
   }
@@ -306,6 +380,7 @@ export function tryPlaceUnit(
     unitId: unit.unitId,
     cargoId: unit.cargoId,
     shipper: unit.shipper,
+    bookingNo: unit.bookingNo,
     name: unit.name,
     cargoType: unit.cargoType,
     cfsCbm: unit.cfsCbm,
@@ -441,10 +516,63 @@ export function tryPlaceUnitBruteForce(
   if (!withinWeightLimit(state.totalWeight, unit.weight, spec)) return false;
   const cargoLike = asCargoLikeForFace(unit);
   const faces = allowedFaces(cargoLike);
-  const score =
-    options?.scoreFn ?? ((c: Candidate) => c.z * 1e8 + c.y * 1e4 + c.x);
+
+  // 룰 우선순위 (tryPlaceUnit 와 동일 — 점수 없이 명시적 비교):
+  //   1) 낮은 z, 2) 낮은 효과적 y (y + booking 보정), 3) 낮은 x
+  const BOOKING_CAP_CM = 200;
+  const BOOKING_PULL = 2.5;
+
+  const bookingDistFor = (
+    x: number,
+    y: number,
+    z: number,
+    eff: { width: number; length: number; height: number },
+  ): number => {
+    if (!unit.bookingNo) return Infinity;
+    let minDist = Infinity;
+    const newCx = x + eff.width / 2;
+    const newCy = y + eff.length / 2;
+    const newCz = z + eff.height / 2;
+    for (const p of state.placements) {
+      if (p.bookingNo !== unit.bookingNo) continue;
+      const cx = p.position.x + p.size.width / 2;
+      const cy = p.position.y + p.size.length / 2;
+      const cz = p.position.z + p.size.height / 2;
+      const d =
+        Math.abs(newCx - cx) + Math.abs(newCy - cy) + Math.abs(newCz - cz);
+      if (d < minDist) minDist = d;
+    }
+    return minDist;
+  };
+
+  interface BFChoice {
+    x: number;
+    y: number;
+    z: number;
+    eff: ReturnType<typeof effectiveSizeFace>;
+    faceIdx: number;
+    bookingDist: number;
+  }
+  const isBetterBF = (a: BFChoice, b: BFChoice): boolean => {
+    if (a.z !== b.z) return a.z < b.z;
+    const aEffY =
+      a.y +
+      (Number.isFinite(a.bookingDist)
+        ? Math.min(a.bookingDist, BOOKING_CAP_CM) * BOOKING_PULL
+        : 0);
+    const bEffY =
+      b.y +
+      (Number.isFinite(b.bookingDist)
+        ? Math.min(b.bookingDist, BOOKING_CAP_CM) * BOOKING_PULL
+        : 0);
+    if (aEffY !== bEffY) return aEffY < bEffY;
+    return a.x < b.x;
+  };
+
+  // 외부에서 scoreFn 명시한 경우만 legacy 점수 비교
+  const legacyScoreFn = options?.scoreFn;
+
   // 5cm grid — fallback 만 호출되므로 비용은 낮지만 정밀도와 trade-off.
-  // 더 정밀한 탐색이 필요하면 STEP=2 로 줄이면 되지만 packBest 14 조합 × 백트래킹 누적되면 ~수십초.
   const STEP = 5;
 
   // z 레벨 = 0 + 모든 placement 의 top z (중복 제거)
@@ -452,8 +580,8 @@ export function tryPlaceUnitBruteForce(
   for (const p of state.placements) zLevelSet.add(p.position.z + p.size.height);
   const zLevels = Array.from(zLevelSet).sort((a, b) => a - b);
 
-  let best: { x: number; y: number; z: number; eff: ReturnType<typeof effectiveSizeFace>; faceIdx: number } | null = null;
-  let bestScore = Number.POSITIVE_INFINITY;
+  let best: BFChoice | null = null;
+  let bestLegacyScore = Number.POSITIVE_INFINITY;
 
   for (const faceIdx of faces) {
     if (
@@ -504,10 +632,24 @@ export function tryPlaceUnitBruteForce(
             if (!stackOk) continue;
           }
 
-          const sc = score({ x, y, z });
-          if (sc < bestScore) {
-            bestScore = sc;
-            best = { x, y, z, eff, faceIdx };
+          const candidate: BFChoice = {
+            x,
+            y,
+            z,
+            eff,
+            faceIdx,
+            bookingDist: bookingDistFor(x, y, z, eff),
+          };
+          if (legacyScoreFn) {
+            const sc = legacyScoreFn({ x, y, z });
+            if (sc < bestLegacyScore) {
+              bestLegacyScore = sc;
+              best = candidate;
+            }
+          } else {
+            if (best === null || isBetterBF(candidate, best)) {
+              best = candidate;
+            }
           }
         }
       }
@@ -522,6 +664,7 @@ export function tryPlaceUnitBruteForce(
     unitId: unit.unitId,
     cargoId: unit.cargoId,
     shipper: unit.shipper,
+    bookingNo: unit.bookingNo,
     name: unit.name,
     cargoType: unit.cargoType,
     cfsCbm: unit.cfsCbm,
@@ -614,7 +757,7 @@ export function expandCargoesToUnits(cargoes: CargoSpec[]): UnitItem[] {
   const out: UnitItem[] = [];
   for (const c of cargoes) {
     const shipperLabel =
-      c.shipperName ?? c.actualShipperName ?? c.itemName ?? "";
+      c.actualShipperName ?? c.shipperName ?? c.itemName ?? "";
     const remarks = { ...c.remarks };
     if (c.unitSizes && c.unitSizes.length > 0) {
       const totalUnits =
@@ -628,6 +771,7 @@ export function expandCargoesToUnits(cargoes: CargoSpec[]): UnitItem[] {
             unitId: `${c.id}-${i++}`,
             cargoId: c.id,
             shipper: shipperLabel,
+            bookingNo: c.bookingNo,
             name: c.itemName,
             cargoType: c.cargoType,
             cfsCbm: c.cbm ?? null,
@@ -646,6 +790,7 @@ export function expandCargoesToUnits(cargoes: CargoSpec[]): UnitItem[] {
           unitId: `${c.id}-${i}`,
           cargoId: c.id,
           shipper: shipperLabel,
+          bookingNo: c.bookingNo,
           name: c.itemName,
           cargoType: c.cargoType,
           cfsCbm: c.cbm ?? null,

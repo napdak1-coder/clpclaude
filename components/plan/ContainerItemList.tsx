@@ -191,12 +191,13 @@ function displayQty(g: ItemGroup): number | null {
   return g.cargoQuantity;
 }
 
-/** 표시용 총 중량 — 시각 unit 합 우선, 없으면 cargoQuantity * unitWeight */
+/** 표시용 총 중량 — 시각 unit 합 우선, 없으면 unitWeight 그대로(=row 총중량 G.W/T) */
 function displayWeight(g: ItemGroup): number | null {
   if (g.visualWeight > 0) return g.visualWeight;
-  if (g.cargoQuantity != null && g.unitWeight != null) {
-    return g.cargoQuantity * g.unitWeight;
-  }
+  // bulk 화물의 unitWeight 는 misleading 이름이지만 실제로 row 총중량 (G.W/T) 이라
+  // quantity 와 곱하면 안 됨 (algorithm.ts:expandToUnits 에서도 weightPerUnit/quantity
+  // 로 unit 분배 처리). 그대로 표시.
+  if (g.unitWeight != null) return g.unitWeight;
   return null;
 }
 
@@ -267,10 +268,9 @@ export function ContainerItemList({ plan }: { plan: ContainerPlan }) {
           <table className="w-full text-xs">
             <thead className="bg-neutral-100 text-neutral-700">
               <tr>
-                <th className="px-2 py-1 text-left font-medium">분류</th>
                 <th
                   className="px-2 py-1 text-center font-medium"
-                  title="사용자 입력 화물 종류 (PL/WB/WC/WD/CR/CL/CT)"
+                  title="사용자 입력 화물 종류 (PL/WB/WC/WD/CR/CL/CT/PK)"
                 >
                   구분
                 </th>
@@ -290,7 +290,7 @@ export function ContainerItemList({ plan }: { plan: ContainerPlan }) {
                   className="px-2 py-1 text-right font-medium"
                   title="엑셀 CFS CBM 셀 또는 사용자가 직접 입력한 값. 채워져 있으면 입고완료 화물 (미입고 화물은 빈 칸)"
                 >
-                  엑셀 CBM
+                  CFS CBM(입고완료)
                 </th>
                 <th
                   className="px-2 py-1 text-right font-medium"
@@ -304,7 +304,6 @@ export function ContainerItemList({ plan }: { plan: ContainerPlan }) {
             </thead>
             <tbody>
               {groups.map((g) => {
-                const kind = kindLabel(g.groupKind);
                 const qty = displayQty(g);
                 const wt = displayWeight(g);
                 const split = isSplit(g);
@@ -320,13 +319,6 @@ export function ContainerItemList({ plan }: { plan: ContainerPlan }) {
                   Math.abs(g.systemCbm - g.cfsCbm) > 0.01;
                 return (
                   <tr key={g.cargoId} className="border-t border-neutral-200">
-                    <td className="px-2 py-1 align-top">
-                      <span
-                        className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${kind.cls}`}
-                      >
-                        {kind.text}
-                      </span>
-                    </td>
                     <td className="px-2 py-1 text-center align-top font-mono text-[11px] text-neutral-700">
                       {g.cargoType ?? "-"}
                     </td>

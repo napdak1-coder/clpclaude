@@ -50,7 +50,7 @@ export default function NewShipmentPage() {
   return (
     <main className="mx-auto w-full p-3 sm:p-6">
       <header className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold">새 부킹 작성</h1>
+        <h1 className="text-xl font-bold">NEW BOOK</h1>
         <Link
           href="/"
           className="text-sm text-neutral-500 underline hover:text-neutral-700"

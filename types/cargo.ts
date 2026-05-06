@@ -75,6 +75,12 @@ export interface CargoSpec {
   sortOrder: number;
   /** 화물 종류 (PL/WB/WC/WD/CR/CL = 정상화물, CT = 카톤) */
   cargoType: CargoType;
+  /** 부킹 번호 — 콘솔 케이스에서 한 shipment 안에 여러 booking 가능. 같은 booking 화물은 인접 배치 우선 */
+  bookingNo?: string;
+  /** House B/L (포워더 발행) — cargo 단위. 부킹 마스터 hbl 과 다를 수 있음 */
+  houseBlNo?: string;
+  /** DEST (목적지) — cargo 단위. 부킹 마스터 destination 과 다를 수 있음 */
+  destination?: string;
   itemName?: string;             // 품목명 (선택)
   /** 화물 라인별 실화주 (콘솔 케이스에서 booking 단위와 다를 수 있음) */
   actualShipperName?: string;

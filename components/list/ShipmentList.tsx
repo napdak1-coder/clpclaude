@@ -99,7 +99,7 @@ export function ShipmentList() {
           href="/shipments/new"
           className="mt-3 inline-block rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
         >
-          + 새 부킹 작성
+          + NEW BOOK
         </Link>
       </div>
     );

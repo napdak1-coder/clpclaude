@@ -177,6 +177,29 @@ const PATTERN_SLASH = /(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\
 //   ex) "80*60*50X2" → count=2,  "118x114x59(6)" → count=6
 const PATTERN_OP = /(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:\(\s*(\d+)\s*\)|[xX]\s*(\d+))?/g;
 
+/**
+ * 사이즈 단위 정규화 — REMARK 에 mm 단위로 적힌 값(예: 2330×1510×1176)을
+ * cm 로 자동 변환.
+ *
+ * 룰: max > 300 AND min ≥ 100 → mm 로 간주 (÷ 10)
+ *  - mm 케이스 (정규화 대상): 1100×1100×400, 2330×1510×1176, 830×630×1120 등 모두 통과
+ *  - cm 그대로 (정규화 X): 제일기공 366×95×103 (min=95<100), 데코론 247×129×46 (max<300) 등
+ *
+ * 이중 조건으로 실제 cm 으로 적힌 큰 화물(제일기공 같이 한 변이 짧은 케이스) 보호.
+ */
+function normalizeMmToCm(d: { width: number; length: number; height: number }): {
+  width: number;
+  length: number;
+  height: number;
+} {
+  const max = Math.max(d.width, d.length, d.height);
+  const min = Math.min(d.width, d.length, d.height);
+  if (max > 300 && min >= 100) {
+    return { width: d.width / 10, length: d.length / 10, height: d.height / 10 };
+  }
+  return d;
+}
+
 export function parseDimensionsFromText(s: string | null | undefined): DimensionMatch[] {
   if (!s) return [];
   const out: DimensionMatch[] = [];
@@ -185,10 +208,15 @@ export function parseDimensionsFromText(s: string | null | undefined): Dimension
   const reSlash = new RegExp(PATTERN_SLASH.source, "gi");
   let m: RegExpExecArray | null;
   while ((m = reSlash.exec(s)) !== null) {
-    out.push({
+    const norm = normalizeMmToCm({
       width: Number(m[1]),
       length: Number(m[2]),
       height: Number(m[3]),
+    });
+    out.push({
+      width: norm.width,
+      length: norm.length,
+      height: norm.height,
       count: m[4] ? Number(m[4]) : undefined,
     });
   }
@@ -198,10 +226,15 @@ export function parseDimensionsFromText(s: string | null | undefined): Dimension
   const reOp = new RegExp(PATTERN_OP.source, "g");
   while ((m = reOp.exec(s)) !== null) {
     const count = m[4] ?? m[5];
-    out.push({
+    const norm = normalizeMmToCm({
       width: Number(m[1]),
       length: Number(m[2]),
       height: Number(m[3]),
+    });
+    out.push({
+      width: norm.width,
+      length: norm.length,
+      height: norm.height,
       count: count ? Number(count) : undefined,
     });
   }
@@ -321,10 +354,31 @@ export async function parseExcelFile(file: File): Promise<ParsedExcel> {
     return c === 0 ? h : `${h}_${c}`;
   });
 
+  // 푸터(요약) 행 키워드 — 첫 번째 비어있지 않은 셀이 이 키워드 중 하나면 행 자체를 스킵.
+  // 호치민 TOTAL 샘플 같이 데이터 끝에 "TOTAL" 합계 행이 추가된 케이스 방지.
+  const FOOTER_KEYWORDS = new Set([
+    "total",
+    "totals",
+    "subtotal",
+    "sum",
+    "합계",
+    "총합",
+    "총계",
+    "소계",
+    "계",
+  ]);
+  const isFooterRow = (row: unknown[]): boolean => {
+    const firstNonEmpty = row.find((c) => c !== "" && c != null);
+    if (firstNonEmpty == null) return false;
+    if (typeof firstNonEmpty !== "string") return false;
+    return FOOTER_KEYWORDS.has(firstNonEmpty.trim().toLowerCase());
+  };
+
   const rows: Record<string, unknown>[] = [];
   for (let i = headerRowIndex + 1; i < aoa.length; i++) {
     const row = (aoa[i] ?? []) as unknown[];
     if (row.every((c) => c === "" || c == null)) continue;
+    if (isFooterRow(row)) continue;
     const obj: Record<string, unknown> = {};
     for (let j = 0; j < headers.length; j++) {
       obj[headers[j]] = row[j] ?? "";

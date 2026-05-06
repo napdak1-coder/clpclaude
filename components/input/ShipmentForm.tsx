@@ -33,6 +33,7 @@ export interface ShipmentFormSubmit {
     id?: string;
     sortOrder: number;
     cargoType: CargoType;
+    bookingNo?: string | null;
     itemName: string | null;
     actualShipperName: string | null;
     shipperName: string | null;
@@ -114,6 +115,9 @@ function rowsFromInitial(d: ShipmentDetail): CargoRow[] {
     id: it.id,
     sortOrder: it.sortOrder ?? idx,
     cargoType: it.cargoType ?? "CT",
+    bookingNo: it.bookingNo ?? "",
+    houseBlNo: it.houseBlNo ?? "",
+    destination: it.destination ?? "",
     itemName: it.itemName ?? "",
     actualShipperName: it.actualShipperName ?? "",
     shipperName: it.shipperName ?? "",
@@ -206,15 +210,9 @@ export function ShipmentForm({
       setError("화물을 1개 이상 입력하세요");
       return;
     }
+    // 사이즈/수량 미기재 행이어도 저장 허용 — 서버에서 placeholder 자동 채움.
+    // 단 음수 중량 같은 명백한 입력 오류만 차단.
     for (const r of rows) {
-      if (r.widthCm <= 0 || r.lengthCm <= 0 || r.heightCm <= 0) {
-        setError("모든 화물 사이즈는 0보다 커야 합니다");
-        return;
-      }
-      if (!Number.isInteger(r.quantity) || r.quantity <= 0) {
-        setError("수량은 양의 정수여야 합니다");
-        return;
-      }
       if (r.weightPerUnitKg < 0) {
         setError("중량은 음수일 수 없습니다");
         return;
@@ -238,6 +236,9 @@ export function ShipmentForm({
         id: r.id,
         sortOrder: r.sortOrder ?? idx,
         cargoType: r.cargoType,
+        bookingNo: toNullableText(r.bookingNo),
+        houseBlNo: toNullableText(r.houseBlNo),
+        destination: toNullableText(r.destination),
         itemName: toNullableText(r.itemName),
         actualShipperName: toNullableText(r.actualShipperName),
         shipperName: toNullableText(r.shipperName),

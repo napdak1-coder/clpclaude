@@ -55,3 +55,6 @@ next-env.d.ts
 
 # 임시 디버그 스크린샷
 /tmp-screenshots/
+scripts/_*.png
+scripts/_*.jpg
+SAMPLE/스크린샷*.png

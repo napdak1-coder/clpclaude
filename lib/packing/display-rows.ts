@@ -127,28 +127,48 @@ export function computeDisplayRows(
   }
 
   // 6) top 화물의 supporter 찾기 + 컬럼 단위로 그룹핑 (한 supporter 에 여러 top 가능)
+  // top 의 직접 supporter 는 bottom 일 수도, 다른 top 일 수도 있다 (top-on-top stack).
+  // 따라서 모든 placement 에서 supporter 를 찾고, 재귀적으로 root bottom 까지 추적해
+  // 그 컬럼에 attach 한다. (이전에는 bottomsAll 만 검색 → top-on-top 화면 누락)
   interface TopAttach {
     supporterKey: string; // supporter 의 oldKey
     src: Placement3D;
     clippedWidth: number;
   }
+  const allPlacements: Placement3D[] = [...bottomsAll, ...topsAll];
+  const directSupporter = new Map<Placement3D, Placement3D>();
+  for (const t of topsAll) {
+    const sup = allPlacements.find(
+      (p) =>
+        p !== t &&
+        Math.abs(p.position.z + p.size.height - t.position.z) < 0.5 &&
+        t.position.x < p.position.x + p.size.width &&
+        t.position.x + t.size.width > p.position.x &&
+        t.position.y < p.position.y + p.size.length &&
+        t.position.y + t.size.length > p.position.y,
+    );
+    if (sup) directSupporter.set(t, sup);
+  }
+  const findRootBottom = (start: Placement3D): Placement3D | null => {
+    let cur: Placement3D | undefined = start;
+    const seen = new Set<Placement3D>();
+    while (cur && cur.layer !== "bottom") {
+      if (seen.has(cur)) return null; // cycle 보호
+      seen.add(cur);
+      cur = directSupporter.get(cur);
+    }
+    return cur ?? null;
+  };
   const topsByBottom = new Map<string, TopAttach[]>(); // oldKey → tops
   for (const t of topsAll) {
-    const supporter = bottomsAll.find(
-      (b) =>
-        Math.abs(b.position.z + b.size.height - t.position.z) < 0.5 &&
-        t.position.x < b.position.x + b.size.width &&
-        t.position.x + t.size.width > b.position.x &&
-        t.position.y < b.position.y + b.size.length &&
-        t.position.y + t.size.length > b.position.y,
-    );
-    if (!supporter) continue;
-    const oldKey = `${supporter.position.x},${supporter.position.y},${supporter.position.z}`;
+    const root = findRootBottom(t);
+    if (!root) continue;
+    const oldKey = `${root.position.x},${root.position.y},${root.position.z}`;
     if (!topsByBottom.has(oldKey)) topsByBottom.set(oldKey, []);
     topsByBottom.get(oldKey)!.push({
       supporterKey: oldKey,
       src: t,
-      clippedWidth: Math.min(t.size.width, supporter.size.width),
+      clippedWidth: Math.min(t.size.width, root.size.width),
     });
   }
 

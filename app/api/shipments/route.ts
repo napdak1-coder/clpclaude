@@ -66,25 +66,19 @@ function validateInput(input: unknown): ShipmentInput {
       throw new Error(`items[${idx}]가 객체가 아닙니다`);
     }
     const it = raw as Record<string, unknown>;
-    const widthCm = Number(it.widthCm);
-    const lengthCm = Number(it.lengthCm);
-    const heightCm = Number(it.heightCm);
-    const quantity = Number(it.quantity);
-    const weightPerUnitKg = Number(it.weightPerUnitKg);
-    if (!Number.isFinite(widthCm) || widthCm <= 0) {
-      throw new Error(`items[${idx}].widthCm 가 유효하지 않습니다`);
-    }
-    if (!Number.isFinite(lengthCm) || lengthCm <= 0) {
-      throw new Error(`items[${idx}].lengthCm 가 유효하지 않습니다`);
-    }
-    if (!Number.isFinite(heightCm) || heightCm <= 0) {
-      throw new Error(`items[${idx}].heightCm 가 유효하지 않습니다`);
-    }
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      throw new Error(`items[${idx}].quantity 는 양의 정수여야 합니다`);
-    }
+    let widthCm = Number(it.widthCm);
+    let lengthCm = Number(it.lengthCm);
+    let heightCm = Number(it.heightCm);
+    let quantity = Number(it.quantity);
+    let weightPerUnitKg = Number(it.weightPerUnitKg);
+    // 사이즈/수량 미기재 허용 — 빈 칸이면 DB CHECK(>0) 통과를 위해 placeholder 자동 치환.
+    // 사용자가 나중에 UI 에서 채워 넣을 수 있도록 저장 자체는 항상 성공시킨다.
+    if (!Number.isFinite(widthCm) || widthCm <= 0) widthCm = 0.01;
+    if (!Number.isFinite(lengthCm) || lengthCm <= 0) lengthCm = 0.01;
+    if (!Number.isFinite(heightCm) || heightCm <= 0) heightCm = 0.01;
+    if (!Number.isInteger(quantity) || quantity <= 0) quantity = 1;
     if (!Number.isFinite(weightPerUnitKg) || weightPerUnitKg < 0) {
-      throw new Error(`items[${idx}].weightPerUnitKg 가 유효하지 않습니다`);
+      weightPerUnitKg = 0;
     }
     return {
       id: typeof it.id === "string" ? it.id : undefined,
@@ -104,6 +98,9 @@ function validateInput(input: unknown): ShipmentInput {
       cbm: typeof it.cbm === "number" ? it.cbm : null,
       aboutCbm: typeof it.aboutCbm === "number" ? it.aboutCbm : null,
       cargoType: typeof it.cargoType === "string" ? it.cargoType : null,
+      bookingNo: typeof it.bookingNo === "string" ? it.bookingNo.trim() : null,
+      houseBlNo: typeof it.houseBlNo === "string" ? it.houseBlNo.trim() : null,
+      destination: typeof it.destination === "string" ? it.destination.trim() : null,
       unitSizes: parseUnitSizesInput(it.unitSizes),
       noStacking: it.noStacking === true,
       topOnly: it.topOnly === true,

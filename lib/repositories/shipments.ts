@@ -111,6 +111,12 @@ export interface ShipmentInput {
 export interface CargoItemInput {
   id?: string;                 // 미지정 시 자동 발급
   cargoType?: CargoType | null;
+  /** 부킹 번호 — 콘솔에서 한 shipment 안 여러 booking 가능 */
+  bookingNo?: string | null;
+  /** House B/L (포워더 발행) — cargo 단위 */
+  houseBlNo?: string | null;
+  /** DEST(목적지) — cargo 단위 */
+  destination?: string | null;
   sortOrder?: number;
   itemName?: string | null;
   /** 화물 라인별 실화주 (콘솔 — 부킹 단위와 다른 화주 다중 보존) */
@@ -199,6 +205,9 @@ function rowToCargo(row: Record<string, unknown>): CargoSpec {
     shipmentId: toString(row.shipment_id),
     sortOrder: toNumber(row.sort_order),
     cargoType: normalizeCargoType(row.cargo_type),
+    bookingNo: toStringOrNull(row.booking_no) ?? undefined,
+    houseBlNo: toStringOrNull(row.house_bl_no) ?? undefined,
+    destination: toStringOrNull(row.destination) ?? undefined,
     itemName: toStringOrNull(row.item_name) ?? undefined,
     actualShipperName: toStringOrNull(row.actual_shipper_name) ?? undefined,
     shipperName: toStringOrNull(row.shipper_name) ?? undefined,
@@ -264,8 +273,9 @@ export async function createShipment(
           actual_shipper_name, shipper_name,
           width_cm, length_cm, height_cm, quantity, weight_per_unit_kg, cbm,
           no_stacking, top_only, orientation, heavier_below, item_remark,
-          unit_sizes_json, about_cbm, cargo_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          unit_sizes_json, about_cbm, cargo_type, booking_no,
+          house_bl_no, destination
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         itemId,
@@ -288,6 +298,9 @@ export async function createShipment(
         serializeUnitSizes(item.unitSizes ?? null),
         item.aboutCbm ?? null,
         normalizeCargoType(item.cargoType ?? null),
+        item.bookingNo ?? null,
+        item.houseBlNo ?? null,
+        item.destination ?? null,
       ],
     };
   });
@@ -347,8 +360,9 @@ export async function updateShipment(
           actual_shipper_name, shipper_name,
           width_cm, length_cm, height_cm, quantity, weight_per_unit_kg, cbm,
           no_stacking, top_only, orientation, heavier_below, item_remark,
-          unit_sizes_json, about_cbm, cargo_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          unit_sizes_json, about_cbm, cargo_type, booking_no,
+          house_bl_no, destination
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         itemId,
@@ -371,6 +385,9 @@ export async function updateShipment(
         serializeUnitSizes(item.unitSizes ?? null),
         item.aboutCbm ?? null,
         normalizeCargoType(item.cargoType ?? null),
+        item.bookingNo ?? null,
+        item.houseBlNo ?? null,
+        item.destination ?? null,
       ],
     };
   });

@@ -50,6 +50,8 @@ interface UnitItem {
   unitId: string;
   cargoId: string;
   shipper: string;
+  /** 부킹 번호 (House B/L) — 같은 booking 화물 묶음 클러스터링용 */
+  bookingNo?: string;
   name?: string;
   cargoType: CargoType;
   /** 사용자 입력 CFS CBM (= cargo.cbm). 그룹 내 모든 unit 이 동일값 공유. */
@@ -102,7 +104,7 @@ function cargoTotalWeight(c: CargoSpec): number {
 function expandToUnits(cargoes: CargoSpec[]): UnitItem[] {
   const out: UnitItem[] = [];
   for (const c of cargoes) {
-    const shipperLabel = c.shipperName ?? c.actualShipperName ?? c.itemName ?? "";
+    const shipperLabel = c.actualShipperName ?? c.shipperName ?? c.itemName ?? "";
     const remarks = { ...c.remarks };
     if (c.unitSizes && c.unitSizes.length > 0) {
       const totalUnits = c.unitSizes.reduce((s, u) => s + u.quantity, 0) || c.quantity;
@@ -115,6 +117,7 @@ function expandToUnits(cargoes: CargoSpec[]): UnitItem[] {
             unitId: `${c.id}-${i++}`,
             cargoId: c.id,
             shipper: shipperLabel,
+            bookingNo: c.bookingNo,
             name: c.itemName,
             cargoType: c.cargoType,
             cfsCbm: c.cbm ?? null,
@@ -133,6 +136,7 @@ function expandToUnits(cargoes: CargoSpec[]): UnitItem[] {
           unitId: `${c.id}-${i}`,
           cargoId: c.id,
           shipper: shipperLabel,
+          bookingNo: c.bookingNo,
           name: c.itemName,
           cargoType: c.cargoType,
           cfsCbm: c.cbm ?? null,
@@ -179,15 +183,36 @@ interface ClassifiedCargoes {
  * REGULAR_TYPES / cargoType 은 화면 라벨/색 구분 등에만 사용.
  */
 function classify(cargoes: CargoSpec[]): ClassifiedCargoes {
+  // 룰 1 — Bulk shipment 감지:
+  // 모든 화물이 c.cbm (CFS CBM) 을 입력했으면 = "전부 입고완료" 출하 케이스.
+  // 실무자 분배는 input 순서대로 컨테이너 채움 + booking 묶음 보존이라 시각 적재
+  // 트랙으로 가지 않고 CT 벌크 트랙(allocateBulkGroup의 sticky+anchor+overflow 룰) 사용.
+  // 호치민 TOTAL 같이 모든 행에 CFS CBM 만 있는 양식 매칭.
+  // 단일 화물은 제외 (단건 시각 적재 의도 보호 — 기존 테스트 케이스 호환)
+  const allHaveCbm =
+    cargoes.length >= 2 && cargoes.every((c) => (c.cbm ?? 0) > 0);
+  if (allHaveCbm) {
+    return { visualCargoes: [], ctCargoes: [...cargoes], completedCargoes: [] };
+  }
+
+  // 룰 2 — 일반 케이스: 사이즈 있으면 시각, 없으면 CT 벌크.
+  // 1cm 미만은 placeholder (DB CHECK 우회용) 로 간주해 CT 로 라우팅.
+  const SIZE_MIN_CM = 1;
   const visualCargoes: CargoSpec[] = [];
   const ctCargoes: CargoSpec[] = [];
   for (const c of cargoes) {
-    const hasMainSize = c.width > 0 && c.length > 0 && c.height > 0;
+    const hasMainSize =
+      c.width >= SIZE_MIN_CM &&
+      c.length >= SIZE_MIN_CM &&
+      c.height >= SIZE_MIN_CM;
     const hasUnitSizes =
       c.unitSizes != null &&
       c.unitSizes.length > 0 &&
       c.unitSizes.every(
-        (u) => u.width > 0 && u.length > 0 && u.height > 0,
+        (u) =>
+          u.width >= SIZE_MIN_CM &&
+          u.length >= SIZE_MIN_CM &&
+          u.height >= SIZE_MIN_CM,
       );
     if (hasMainSize || hasUnitSizes) {
       visualCargoes.push(c);
@@ -259,6 +284,13 @@ function decideContainers(
     if (fits.length > 0) prefer = fits;
   }
 
+  // 2.5순위: 안전마진 — slack(잉여 용량) 1.5m³ 미만 조합은 만재 위험으로 제외.
+  // 임계값은 실 사례 기반: 1ST SG slack 18.26 ✓, HM 1ST slack 2.26 ✓, 2ST SG slack 0.82 reject.
+  // 모든 조합이 < 1.5 이면 룰 미적용 (강제 만재 허용).
+  const SAFETY_BUFFER_CBM = 1.5;
+  const safe = prefer.filter((c) => c.capacity - totalCbm >= SAFETY_BUFFER_CBM);
+  if (safe.length > 0) prefer = safe;
+
   // 3순위: 잉여 용량(capacity - totalCbm) 가장 적은 조합 → 가장 알맞은 크기
   const minSlack = Math.min(...prefer.map((c) => c.capacity - totalCbm));
   prefer = prefer.filter((c) => c.capacity - totalCbm === minSlack);
@@ -305,40 +337,92 @@ function allocateBulkGroup(
   group: "ct" | "completed",
   ordered: ContainerState[],
   cbmGetter: (c: CargoSpec) => number,
+  /** visual 배치 단계에서 이미 anchor 가 설정된 booking → container 맵 */
+  initialBookingAnchor?: Map<string, ContainerState>,
 ): { unplacedItems: { cargo: CargoSpec; cbm: number }[] } {
+  // 컨테이너 cap 의 soft overflow 비율. 운영 한도(60/28) 는 보수적이어서
+  // 실무에서 5% 정도는 통상 허용. 부킹 묶음 보존을 위해 약간의 overflow 허용.
+  const SOFT_OVERFLOW = 1.05;
   const unplacedItems: { cargo: CargoSpec; cbm: number }[] = [];
+
+  // booking-aware: 같은 booking_no 의 cargo 가 어느 컨에 안착했는지 추적
+  // visual 트랙에서 이미 배치된 booking 도 시작 시점에 미리 채워둠 (split 방지)
+  const bookingAnchor = new Map<string, ContainerState>(initialBookingAnchor ?? []);
+
+  // sticky container index — 한 번 다음 컨으로 넘어가면 되돌아가지 않음.
+  // 실무자 분배 패턴 재현 (input 순서 + 컨테이너 채움 순서대로). 작은 cargo 가
+  // 앞 컨의 빈 자리에 squeeze in 되어 booking 흐름을 깨는 것을 방지.
+  let stickyIdx = 0;
+
+  const placeOne = (
+    cont: ContainerState,
+    cg: CargoSpec,
+    fill: number,
+    cargoTotalCbm: number,
+    shipperLabel: string,
+  ): void => {
+    cont.bulkItems.push({
+      cargoId: cg.id,
+      shipper: shipperLabel,
+      name: cg.itemName,
+      cargoType: cg.cargoType,
+      cbm: fill,
+      totalCbm: cargoTotalCbm,
+      width: cg.width,
+      length: cg.length,
+      height: cg.height,
+      quantity: cg.quantity,
+      weightPerUnit: cg.weightPerUnit,
+      cfsCbm: cg.cbm ?? null,
+      group,
+    });
+    if (group === "ct") cont.ctCbm += fill;
+    else cont.completedCbm += fill;
+  };
+
   for (const cg of cargoes) {
     const cargoTotalCbm = cbmGetter(cg);
     let remaining = cargoTotalCbm;
     if (remaining <= 0) continue;
     const shipperLabel =
-      cg.shipperName ?? cg.actualShipperName ?? cg.itemName ?? "";
-    for (const cont of ordered) {
-      if (remaining <= 0) break;
-      const used = computeContainerLoadedCbm(cont);
-      const free = Math.max(0, getContainerCbm(cont.spec) - used);
-      if (free <= 0) continue;
-      const fill = Math.min(remaining, free);
-      cont.bulkItems.push({
-        cargoId: cg.id,
-        shipper: shipperLabel,
-        name: cg.itemName,
-        cargoType: cg.cargoType,
-        cbm: fill,
-        totalCbm: cargoTotalCbm,
-        width: cg.width,
-        length: cg.length,
-        height: cg.height,
-        quantity: cg.quantity,
-        weightPerUnit: cg.weightPerUnit,
-        cfsCbm: cg.cbm ?? null,
-        group,
-      });
-      if (group === "ct") cont.ctCbm += fill;
-      else cont.completedCbm += fill;
-      remaining -= fill;
+      cg.actualShipperName ?? cg.shipperName ?? cg.itemName ?? "";
+
+    // 1) booking anchor 우선 — sticky 무관 (booking 묶음 보존)
+    const anchor = cg.bookingNo ? bookingAnchor.get(cg.bookingNo) : null;
+    if (anchor) {
+      const used = computeContainerLoadedCbm(anchor);
+      const cap = getContainerCbm(anchor.spec);
+      const softFree = Math.max(0, cap * SOFT_OVERFLOW - used);
+      if (softFree >= remaining) {
+        placeOne(anchor, cg, remaining, cargoTotalCbm, shipperLabel);
+        remaining = 0;
+      }
     }
+
+    // 2) sticky 시작점부터 시도 — softCap 안에 통째로 들어가야 함
+    // **CBM 쪼개기 절대 금지**: 한 화물 행은 한 컨테이너에만 들어간다.
+    // 어느 컨테이너에도 통째로 안 들어가면 unplaced 로 분류 (split fallback 없음).
+    // 물리/실무 상식: 한 House B/L 화물 행을 두 컨에 나눠 출고할 수 없음.
+    if (remaining > 0) {
+      for (let i = stickyIdx; i < ordered.length && remaining > 0; i++) {
+        const cont = ordered[i];
+        const used = computeContainerLoadedCbm(cont);
+        const cap = getContainerCbm(cont.spec);
+        const softFree = Math.max(0, cap * SOFT_OVERFLOW - used);
+        if (softFree >= remaining) {
+          placeOne(cont, cg, remaining, cargoTotalCbm, shipperLabel);
+          remaining = 0;
+          if (i > stickyIdx) stickyIdx = i;
+          if (cg.bookingNo && !bookingAnchor.has(cg.bookingNo)) {
+            bookingAnchor.set(cg.bookingNo, cont);
+          }
+        }
+        // 안 맞으면 다음 컨테이너 시도 (continue) — split 안 함
+      }
+    }
+
     if (remaining > 0.0001) {
+      // 어느 컨에도 통째로 안 들어감 → 미배치. 사용자가 컨테이너 추가 또는 화물 조정 필요.
       unplacedItems.push({ cargo: cg, cbm: remaining });
     }
   }
@@ -732,18 +816,30 @@ export function pack(
       }
     });
   };
-  // 같은 화주는 인접 배치, 같은 cargoId 는 더 인접 — LDF 우선순위 보존
+  // 클러스터링 — 1) booking → 2) shipper → 3) cargoId → 4) LDF rank
+  // 같은 booking 화물 묶음 우선 (실무 출고/검수/통관 단위)
   const sortClustered = (units: UnitItem[]): UnitItem[] => {
     const ldf = sortBig(units);
+    const bookingFirst = new Map<string, number>();
     const shipperFirst = new Map<string, number>();
     const cargoFirst = new Map<string, number>();
     const ldfRank = new Map<string, number>();
     ldf.forEach((u, idx) => {
+      // bookingNo 없는 unit 은 빈 문자열로 처리 — 같이 묶이지만 priority 마지막
+      const bk = u.bookingNo ?? "";
+      if (!bookingFirst.has(bk)) bookingFirst.set(bk, idx);
       if (!shipperFirst.has(u.shipper)) shipperFirst.set(u.shipper, idx);
       if (!cargoFirst.has(u.cargoId)) cargoFirst.set(u.cargoId, idx);
       ldfRank.set(u.unitId, idx);
     });
     return [...ldf].sort((a, b) => {
+      const aBk = a.bookingNo ?? "";
+      const bBk = b.bookingNo ?? "";
+      // 빈 booking 은 후순위 (있는 것 먼저)
+      if ((aBk === "") !== (bBk === "")) return aBk === "" ? 1 : -1;
+      const ba = bookingFirst.get(aBk) ?? 0;
+      const bb = bookingFirst.get(bBk) ?? 0;
+      if (ba !== bb) return ba - bb;
       const sa = shipperFirst.get(a.shipper) ?? 0;
       const sb = shipperFirst.get(b.shipper) ?? 0;
       if (sa !== sb) return sa - sb;
@@ -812,6 +908,22 @@ export function pack(
     if (fit) autoDesignatedIdx = fit.index;
   }
 
+  // 동종(같은 spec) 컨테이너 그룹 안에서 현재 적재량(visual+ct) 낮은 쪽을 앞으로 — 균형 분배
+  // 다른 spec 끼리는 base 순서 유지 (예: 40FT vs 20FT 의 routing 우선순위는 그대로)
+  const balanceSortSameType = (list: ContainerState[]): ContainerState[] => {
+    if (list.length < 2) return list;
+    const out = [...list];
+    out.sort((a, b) => {
+      // base 순서 보존 — 같은 spec 일 때만 적재량 비교
+      if (a.spec.type !== b.spec.type) return list.indexOf(a) - list.indexOf(b);
+      const loadA = a.packState.visualCbm + a.ctCbm;
+      const loadB = b.packState.visualCbm + b.ctCbm;
+      if (loadA !== loadB) return loadA - loadB;
+      return list.indexOf(a) - list.indexOf(b);
+    });
+    return out;
+  };
+
   const candidatesFor = (u: UnitItem): ContainerState[] => {
     const idx = fixedMap[u.cargoId];
     if (typeof idx === "number") {
@@ -830,11 +942,13 @@ export function pack(
       //   입고완료     → designated 만 (다른 컨 fallback X)
       //   비-입고완료  → designated 제외 우선, designated fallback 허용 (잉여 공간 활용)
       if (completedCargoIds.has(u.cargoId)) {
-        return designated ? [designated] : orderedContainers;
+        return designated ? [designated] : balanceSortSameType(orderedContainers);
       }
-      return designated ? [...others, designated] : orderedContainers;
+      return designated
+        ? [...balanceSortSameType(others), designated]
+        : balanceSortSameType(orderedContainers);
     }
-    return orderedContainers;
+    return balanceSortSameType(orderedContainers);
   };
 
   // (4) 모드별 placement
@@ -1003,11 +1117,28 @@ export function pack(
       }
       return true;
     });
+    // visual 단계에서 이미 배치된 booking → container 맵 미리 빌드.
+    // 같은 booking 의 visual 항목이 컨테이너 X 에 들어갔다면, 같은 booking 의 CT 항목도 X 로 가야 함
+    // (booking split 방지). cargoId → bookingNo 매핑 후 placements 의 cargoId 로 컨테이너 추적.
+    const cargoIdToBooking = new Map<string, string>();
+    for (const c of cargoes) {
+      if (c.bookingNo) cargoIdToBooking.set(c.id, c.bookingNo);
+    }
+    const visualBookingAnchor = new Map<string, ContainerState>();
+    for (const cont of containers) {
+      for (const p of cont.packState.placements) {
+        const bn = cargoIdToBooking.get(p.cargoId);
+        if (bn && !visualBookingAnchor.has(bn)) {
+          visualBookingAnchor.set(bn, cont);
+        }
+      }
+    }
     const result = allocateBulkGroup(
       ctCargoes,
       "ct",
       ctTargets,
       (c) => c.cbm ?? c.aboutCbm ?? cargoCbm(c),
+      visualBookingAnchor,
     );
     for (const u of result.unplacedItems) {
       bulkUnplaced.push(makeUnplacedFromCargo(u.cargo, u.cbm, "ct"));
@@ -1106,7 +1237,7 @@ function makeUnplacedFromCargo(
   return {
     cargoId: c.id,
     reason: `${groupLabel} ${unfitCbm.toFixed(3)}m³ 분이 컨테이너 여유 CBM 에 들어가지 않음`,
-    shipper: c.shipperName ?? c.actualShipperName ?? c.itemName ?? "",
+    shipper: c.actualShipperName ?? c.shipperName ?? c.itemName ?? "",
     name: c.itemName,
     cargoType: c.cargoType,
     width: c.width,
@@ -1153,10 +1284,24 @@ export function packBest(
     "shortest-height",
   ];
 
-  const evaluate = (r: CLPResult): number => {
-    const unp = r.unplaced.reduce((s, u) => s + (u.quantity ?? 1), 0);
-    // 입고완료 분리도 보너스 — 입고완료 화물(cfsCbm 입력) 들이 한 컨테이너에 모일수록 +.
-    // 추가: 가장 작은 컨테이너에 모일 때 더 큰 보너스 (마감 컨테이너 정책 우선).
+  // 결과 평가 룰 (점수 없이 lexicographic 우선순위 비교):
+  //   1순위 — 미배치 화물 수량 (적을수록 좋음)
+  //   2순위 — 입고완료 화물 마감 등급 (1컨최소=2, 1컨다른크기=1, 중립=0, 분산=음수)
+  //   3순위 — 평균 충전률 (높을수록 좋음)
+  //
+  // 이전엔 score = -unp*100000 + consolidationBonus + avgFillRate 합산점수였으나,
+  // unp 가중치가 압도적이라 사실상 lexicographic. 명시적 룰로 표현해 매직넘버 제거.
+  interface EvalKey {
+    unplacedCount: number;
+    consolidationTier: number; // 2=1컨최소, 1=1컨다른크기, 0=중립(입고완료 0건), 음수=분산(컨 수에 비례)
+    fillRatePct: number;
+    balancePenalty: number; // 컨테이너 간 CBM 편차 max — 작을수록 균형, 우선
+  }
+  const evalKey = (r: CLPResult): EvalKey => {
+    const unplacedCount = r.unplaced.reduce(
+      (s, u) => s + (u.quantity ?? 1),
+      0,
+    );
     const completedContainersMap = new Map<number, ContainerPlan>();
     for (const c of r.containers) {
       for (const row of c.rows) {
@@ -1166,23 +1311,60 @@ export function packBest(
         }
       }
     }
-    let consolidationBonus = 0;
+    let consolidationTier = 0;
     if (completedContainersMap.size === 1) {
       const target = [...completedContainersMap.values()][0];
       const targetVol =
-        target.spec.innerWidth * target.spec.innerLength * target.spec.innerHeight;
-      // target 이 모든 컨테이너 중 가장 작은가?
+        target.spec.innerWidth *
+        target.spec.innerLength *
+        target.spec.innerHeight;
       const isSmallest = r.containers.every(
         (o) =>
           o.index === target.index ||
           o.spec.innerWidth * o.spec.innerLength * o.spec.innerHeight >=
             targetVol,
       );
-      consolidationBonus = isSmallest ? 2000 : 1000;
+      consolidationTier = isSmallest ? 2 : 1;
     } else if (completedContainersMap.size > 1) {
-      consolidationBonus = -200 * (completedContainersMap.size - 1);
+      // 분산일수록 더 나쁨 — 컨 수가 많을수록 음수 더 작음
+      consolidationTier = -(completedContainersMap.size - 1);
     }
-    return -unp * 100000 + consolidationBonus + r.summary.avgFillRate;
+    // 동종(같은 spec) 컨테이너 그룹별 CBM 편차 max — 다른 spec 끼리는 비교 의미 없음
+    const sameTypeGroups = new Map<string, number[]>();
+    for (const c of r.containers) {
+      const key = c.spec.type;
+      const cbms = sameTypeGroups.get(key) ?? [];
+      cbms.push(c.totalCbm + c.ctCbm);
+      sameTypeGroups.set(key, cbms);
+    }
+    let balancePenalty = 0;
+    for (const cbms of sameTypeGroups.values()) {
+      if (cbms.length < 2) continue;
+      balancePenalty = Math.max(
+        balancePenalty,
+        Math.max(...cbms) - Math.min(...cbms),
+      );
+    }
+    return {
+      unplacedCount,
+      consolidationTier,
+      fillRatePct: r.summary.avgFillRate,
+      balancePenalty,
+    };
+  };
+  // a 가 b 보다 더 좋은 결과면 true
+  const isBetterResult = (a: EvalKey, b: EvalKey): boolean => {
+    // Rule 1: 미배치 적은 게 무조건 우선
+    if (a.unplacedCount !== b.unplacedCount)
+      return a.unplacedCount < b.unplacedCount;
+    // Rule 2: 입고완료 마감 등급 높은 쪽 우선 (2 > 1 > 0 > 음수)
+    if (a.consolidationTier !== b.consolidationTier)
+      return a.consolidationTier > b.consolidationTier;
+    // Rule 3: 충전률 높은 쪽 우선
+    if (Math.abs(a.fillRatePct - b.fillRatePct) > 0.001)
+      return a.fillRatePct > b.fillRatePct;
+    // Rule 4: 동종 컨테이너 간 CBM 편차 작은 쪽 (균형 분배 우선)
+    return a.balancePenalty < b.balancePenalty;
   };
 
   const containerOrders: PackOptions["containerOrder"][] = [
@@ -1198,7 +1380,7 @@ export function packBest(
   const consolidateModes: boolean[] = userPinned ? [false] : [true, false];
   const tryAllStrategies = (input: CargoSpec[]): CLPResult => {
     let best: CLPResult | null = null;
-    let bestScore = -Infinity;
+    let bestKey: EvalKey | null = null;
     for (const strat of strategies) {
       for (const co of containerOrders) {
         for (const consolidate of consolidateModes) {
@@ -1210,9 +1392,9 @@ export function packBest(
               autoConsolidateCompleted: consolidate,
               placementMode: pm,
             });
-            const score = evaluate(r);
-            if (score > bestScore) {
-              bestScore = score;
+            const key = evalKey(r);
+            if (bestKey === null || isBetterResult(key, bestKey)) {
+              bestKey = key;
               best = r;
             }
           }
@@ -1222,13 +1404,11 @@ export function packBest(
     return best ?? pack(input, mode, options);
   };
 
-  // 1단계: 기본 5 전략
+  // 1단계: 기본 전략 그룹
   let current = tryAllStrategies(cargoes);
-  let currentScore = evaluate(current);
+  let currentKey = evalKey(current);
 
   // 2단계: 백트래킹 — 미배치 화물 우선 input 순으로 강제 (input strategy 만)
-  // 5 전략 sort 가 입력 순서를 무시하기 때문에 input strategy 단독으로 swap 효과 발생 유도.
-  // 한 화물씩 cargoes 의 맨 앞으로 옮긴 input 들을 시도 + 미배치 전체를 맨 앞으로 옮긴 input 시도.
   const MAX_BACKTRACK = 12;
   let inputOrder = [...cargoes];
   for (let iter = 0; iter < MAX_BACKTRACK; iter++) {
@@ -1243,31 +1423,116 @@ export function packBest(
       ...inputOrder.filter((c) => !unplacedIds.includes(c.id)),
     ];
     const candA = pack(allFront, mode, { ...options, sortStrategy: "input" });
-    if (evaluate(candA) > currentScore) {
+    const candAKey = evalKey(candA);
+    if (isBetterResult(candAKey, currentKey)) {
       current = candA;
-      currentScore = evaluate(candA);
+      currentKey = candAKey;
       inputOrder = allFront;
       improved = true;
       continue;
     }
 
-    // (b) 미배치 화물 1개씩 맨 앞으로 swap — 5 전략 best 채택
+    // (b) 미배치 화물 1개씩 맨 앞으로 swap — 전체 전략 best 채택
     for (const uid of unplacedIds) {
       const reordered = [
         ...inputOrder.filter((c) => c.id === uid),
         ...inputOrder.filter((c) => c.id !== uid),
       ];
       const cand = tryAllStrategies(reordered);
-      const score = evaluate(cand);
-      if (score > currentScore) {
+      const candKey = evalKey(cand);
+      if (isBetterResult(candKey, currentKey)) {
         current = cand;
-        currentScore = score;
+        currentKey = candKey;
         inputOrder = reordered;
         improved = true;
         break;
       }
     }
     if (!improved) break;
+  }
+
+  // 3단계: 동종(같은 spec) 컨 간 balance-swap — 미배치 0 + 동종 컨 2+ 인 경우만 시도.
+  //   현재 분배에서 cargo 1개 또는 swap 한 쌍 이동으로 balance 개선되면 채택.
+  //   fixedAssignment 옵션으로 강제 후 재pack → 룰 통과 + balance 개선이면 갱신.
+  if (current.unplaced.length === 0 && current.containers.length >= 2) {
+    const cargoToContainer = new Map<string, number>();
+    for (const c of current.containers) {
+      for (const row of c.rows) {
+        for (const it of [...row.bottomItems, ...row.topItems]) {
+          cargoToContainer.set(it.cargoId, c.index);
+        }
+      }
+      for (const b of c.bulkItems ?? []) {
+        if (!cargoToContainer.has(b.cargoId))
+          cargoToContainer.set(b.cargoId, c.index);
+      }
+    }
+    // 같은 spec 끼리 (idx, type) pair 추출
+    const sameTypePairs: [number, number][] = [];
+    for (let i = 0; i < current.containers.length; i++) {
+      for (let j = i + 1; j < current.containers.length; j++) {
+        if (current.containers[i].spec.type === current.containers[j].spec.type) {
+          sameTypePairs.push([
+            current.containers[i].index,
+            current.containers[j].index,
+          ]);
+        }
+      }
+    }
+    const SWAP_THRESHOLD_CBM = 3;
+    let swapImproved = true;
+    let swapIters = 0;
+    const MAX_SWAP_ITERS = 8;
+    while (swapImproved && swapIters < MAX_SWAP_ITERS) {
+      swapImproved = false;
+      swapIters++;
+      for (const [idxA, idxB] of sameTypePairs) {
+        const aPlan = current.containers.find((c) => c.index === idxA);
+        const bPlan = current.containers.find((c) => c.index === idxB);
+        if (!aPlan || !bPlan) continue;
+        const cbmA = aPlan.totalCbm + aPlan.ctCbm;
+        const cbmB = bPlan.totalCbm + bPlan.ctCbm;
+        if (Math.abs(cbmA - cbmB) <= SWAP_THRESHOLD_CBM) continue;
+        // cargoes by side
+        const cargosA = [...cargoToContainer.entries()]
+          .filter(([, ci]) => ci === idxA)
+          .map(([cid]) => cid);
+        const cargosB = [...cargoToContainer.entries()]
+          .filter(([, ci]) => ci === idxB)
+          .map(([cid]) => cid);
+        // 단일 이동 시도 (큰 컨테이너 → 작은 컨테이너) — 모든 후보 평가, best balance 채택
+        const fromBigger = cbmA > cbmB ? cargosA : cargosB;
+        const toSmaller = cbmA > cbmB ? idxB : idxA;
+        let bestCand: CLPResult | null = null;
+        let bestCandKey: EvalKey | null = null;
+        let bestCargoId: string | null = null;
+        for (const cid of fromBigger) {
+          const newMap: Record<string, number> = {};
+          for (const [k, v] of cargoToContainer) newMap[k] = v;
+          newMap[cid] = toSmaller;
+          const cand = pack(cargoes, mode, {
+            ...options,
+            fixedAssignment: newMap,
+            fixedContainers: current.containers.map((c) => c.spec.type),
+          });
+          const candKey = evalKey(cand);
+          if (isBetterResult(candKey, currentKey)) {
+            if (bestCandKey === null || isBetterResult(candKey, bestCandKey)) {
+              bestCandKey = candKey;
+              bestCand = cand;
+              bestCargoId = cid;
+            }
+          }
+        }
+        if (bestCand && bestCargoId) {
+          current = bestCand;
+          currentKey = bestCandKey!;
+          cargoToContainer.set(bestCargoId, toSmaller);
+          swapImproved = true;
+          break;
+        }
+      }
+    }
   }
 
   return current;

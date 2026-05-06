@@ -292,6 +292,26 @@ function buildImportPayload(
       }
     }
 
+    // 부킹/HBL/DEST 컬럼은 BookingFieldKey 라 cargo 루프에서 안 잡히지만
+    // 콘솔 양식은 행마다 다른 값을 가질 수 있어 cargo row 에도 per-row 보존.
+    const findHeaderForField = (f: string): string | undefined =>
+      Object.entries(mapping).find(([, ff]) => ff === f)?.[0];
+    const bnHeader = findHeaderForField("bookingNo");
+    if (bnHeader) {
+      const v = row[bnHeader];
+      if (v != null && String(v).trim()) base.bookingNo = String(v).trim();
+    }
+    const hblHeader = findHeaderForField("houseBlNo");
+    if (hblHeader) {
+      const v = row[hblHeader];
+      if (v != null && String(v).trim()) base.houseBlNo = String(v).trim();
+    }
+    const destHeader = findHeaderForField("destination");
+    if (destHeader) {
+      const v = row[destHeader];
+      if (v != null && String(v).trim()) base.destination = String(v).trim();
+    }
+
     // 부킹용 generalRemark 컬럼에도 사이즈 텍스트가 있을 수 있어 같이 스캔
     // (사용자 양식의 "REMARK" 가 itemRemark 로 매핑돼도 안전망 차원에서 둘 다 본다)
     if (extractDimensions && !remarkText) {
@@ -327,13 +347,30 @@ function buildImportPayload(
     }
 
     if (dims.length === 0) {
-      // 사이즈가 전혀 없는 행은 화물로 못 쓰니 스킵 (엑셀 CBM 자동계산은 더 이상 안 함)
+      // 사이즈가 없어도 행에 의미 있는 정보 (House B/L / 실화주 / 화주 / Booking No /
+      // Q'TY / CBM 등) 가 하나라도 있으면 cargoRow 로 유지. 사용자가 UI 에서 W/L/H 를
+      // 채워 넣을 수 있음. (이전엔 W/L/H/Qty 다 있어야 push → 호치민처럼 사이즈 칼럼
+      // 없는 양식에서 행 절반 이상 손실됨.)
+      const hasMeaningful =
+        (base.actualShipperName ?? "").trim().length > 0 ||
+        (base.shipperName ?? "").trim().length > 0 ||
+        (base.itemName ?? "").trim().length > 0 ||
+        base.quantity > 0 ||
+        (base.cbm ?? 0) > 0 ||
+        (base.aboutCbm ?? 0) > 0 ||
+        (base.weightPerUnitKg ?? 0) > 0 ||
+        (base.itemRemark ?? "").trim().length > 0;
       if (
         base.widthCm > 0 &&
         base.lengthCm > 0 &&
         base.heightCm > 0 &&
         base.quantity > 0
       ) {
+        cargoRows.push(base);
+      } else if (hasMeaningful) {
+        // W/L/H 미입력인 채 저장 가능하려면 CT(카톤) 으로 분류해야 검증 통과 (CBM 만 합산).
+        // 사용자가 나중에 사이즈 채우고 cargoType 을 PL/WB/등으로 바꿀 수 있음.
+        if (!base.cargoType) base.cargoType = "CT";
         cargoRows.push(base);
       }
     } else if (dims.length === 1) {
@@ -397,9 +434,21 @@ const SAMPLE_FILES: Array<{
 }> = [
   {
     key: "singapore-total",
-    label: "샘플: 싱가폴 TOTAL",
+    label: "1ST SG TOTAL",
     url: "/samples/singapore-total.xlsx",
     filename: "싱가폴 TOTAL 샘플.xlsx",
+  },
+  {
+    key: "singapore-total-2",
+    label: "2ST SG TOTAL",
+    url: "/samples/singapore-total-2.xlsx",
+    filename: "싱가폴 TOTAL 두번째.xlsx",
+  },
+  {
+    key: "hochiminh-total",
+    label: "1ST HM TOTAL",
+    url: "/samples/hochiminh-total.xlsx",
+    filename: "호치민 TOTAL 샘플.xlsx",
   },
 ];
 
