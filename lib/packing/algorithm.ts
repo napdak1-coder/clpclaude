@@ -967,6 +967,24 @@ export function pack(
     state.totalWeight = snap.totalWeight;
     state.visualCbm = snap.visualCbm;
   };
+
+  // **묶음 완화 룰 (인접 lane)**:
+  // 같은 cargoId 의 unit 이 한 column 에 못 쌓이고 fallback 으로 갈 때,
+  // 이미 배치된 같은 cargoId placement 와 가까운 extreme point 우선 시도.
+  // 효과: 같은 화주 박스가 멀리 흩어지지 않고 인접 행/lane 에 모여 배치됨.
+  const tryPlaceUnitWithProximity = (
+    u: UnitItem,
+    state: ContainerPackState,
+    spec: ContainerSpec,
+    anchor: { x: number; y: number } | undefined,
+  ): boolean => {
+    if (!anchor) return tryPlaceUnit(u, state, spec);
+    // anchor 와 가까운 extreme point 선호 (Manhattan 거리)
+    const scoreFn = (c: { x: number; y: number; z: number }): number => {
+      return Math.abs(c.x - anchor.x) + Math.abs(c.y - anchor.y);
+    };
+    return tryPlaceUnit(u, state, spec, { scoreFn });
+  };
   const placeQueuePure = (queue: UnitItem[]): void => {
     // Pure 모드는 클러스터링 무시하고 LDF 만 — 작은 케이스에서 wrapper 모드 손해보는 경우용
     const ldfQueue = sortBig(queue);
@@ -987,11 +1005,18 @@ export function pack(
       for (const c of candidates) {
         const snap = structuredClone(c.packState);
         let allOk = true;
+        let anchor: { x: number; y: number } | undefined;
         for (const u of units) {
-          if (!tryPlaceUnit(u, c.packState, c.spec) &&
-              !tryPlaceUnitBruteForce(u, c.packState, c.spec)) {
+          // 묶음 완화 — 같은 cargoId 의 첫 unit 위치를 anchor 로 잡고 다음 unit 은 그 근처
+          const ok = tryPlaceUnitWithProximity(u, c.packState, c.spec, anchor) ||
+                     tryPlaceUnitBruteForce(u, c.packState, c.spec);
+          if (!ok) {
             allOk = false;
             break;
+          }
+          if (!anchor) {
+            const lastP = c.packState.placements[c.packState.placements.length - 1];
+            if (lastP) anchor = { x: lastP.position.x, y: lastP.position.y };
           }
         }
         if (allOk) {
@@ -1087,14 +1112,28 @@ export function pack(
           }
         }
         // fallback unit — 단일 컨테이너로만 시도
+        // 묶음 완화 — 이미 배치된 같은 cargoId placement 와 가까운 extreme point 우선
         fallbackUnits.sort(
           (a, b) => (queueIdx.get(a.unitId) ?? 0) - (queueIdx.get(b.unitId) ?? 0),
         );
+        // 같은 cargoId 의 첫 placement 위치를 anchor 로 (bundle 결과 포함)
+        const cargoAnchor = new Map<string, { x: number; y: number }>();
+        for (const p of cand.packState.placements) {
+          if (!cargoAnchor.has(p.cargoId)) {
+            cargoAnchor.set(p.cargoId, { x: p.position.x, y: p.position.y });
+          }
+        }
         for (const u of fallbackUnits) {
-          if (!tryPlaceUnit(u, cand.packState, cand.spec) &&
-              !tryPlaceUnitBruteForce(u, cand.packState, cand.spec)) {
+          const anchor = cargoAnchor.get(u.cargoId);
+          const ok = tryPlaceUnitWithProximity(u, cand.packState, cand.spec, anchor) ||
+                     tryPlaceUnitBruteForce(u, cand.packState, cand.spec);
+          if (!ok) {
             allOk = false;
             break;
+          }
+          if (!anchor) {
+            const lastP = cand.packState.placements[cand.packState.placements.length - 1];
+            if (lastP) cargoAnchor.set(u.cargoId, { x: lastP.position.x, y: lastP.position.y });
           }
         }
 
