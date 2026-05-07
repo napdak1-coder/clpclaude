@@ -1353,10 +1353,36 @@ export function pack(
     }
     // 컨테이너별 unit-LDF interleave (fixedAssignment 그룹만)
     for (const [cand, groups] of singleCandPerContainer) {
-      const pool = groups.flatMap((cg) => cg.buckets.flatMap((bk) => bk.units));
-      // tall-first 정렬 — 높은 박스(h≥100) 먼저 자리 잡고 작은 박스가 빈틈 채움
-      // 실험으로 검증: 1ST SG 17 cargo 39 unit 0 미배치 (LDF 만으론 1 미배치)
+      // Step 1: 같은 cargoId multi-unit 의 column stack 우선 (bundle stack)
+      const fallbackUnits: UnitItem[] = [];
+      for (const cg of groups) {
+        for (const bucket of cg.buckets) {
+          if (bucket.bundleEligible) {
+            let remaining = bucket.units;
+            while (remaining.length >= 2) {
+              const result = tryBundleStack(remaining, [cand]);
+              if (result.placed.length === 0) break;
+              remaining = result.remaining;
+            }
+            for (const u of remaining) fallbackUnits.push(u);
+          } else {
+            for (const u of bucket.units) fallbackUnits.push(u);
+          }
+        }
+      }
+      // Step 2: 남은 unit LDF (막대형 우선, tall-first, 부피 desc)
+      const pool = fallbackUnits;
+      // 정렬 우선순위:
+      //   1순위: 막대형 (가장 긴 변이 컨테이너 폭 234 초과) — 회전·column stack 강제 필요
+      //   2순위: tall-first (h≥100) — 자리 fix 우선
+      //   3순위: 부피 desc (LDF) — 큰 박스부터
+      // 실험 검증: 1ST SG 39/39, 3ST SG 막대형 (세아특수강 322×42×41) 컬럼 stack 필요
       const unitLdf = [...pool].sort((a, b) => {
+        const aLongest = Math.max(a.width, a.length, a.height);
+        const bLongest = Math.max(b.width, b.length, b.height);
+        const aRod = aLongest > 234 ? 1 : 0;
+        const bRod = bLongest > 234 ? 1 : 0;
+        if (aRod !== bRod) return bRod - aRod;
         const aTall = a.height >= 100 ? 1 : 0;
         const bTall = b.height >= 100 ? 1 : 0;
         if (aTall !== bTall) return bTall - aTall;
