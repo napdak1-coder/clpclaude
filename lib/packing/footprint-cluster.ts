@@ -52,6 +52,13 @@ export interface FootprintClusterOptions {
   minContainerCbm?: number;
   /** 활성 unit 최소 개수 (기본 5) */
   minUnits?: number;
+  /**
+   * 옵션 C — 안쪽 깊숙이 고정점 (best-fit-deepest anchor).
+   * 컬럼 첫 박스를 컨테이너 입구(y 최솟값)가 아닌 안쪽 끝(y 최댓값) 후보에 강제 배치.
+   * 큰 묶음을 안쪽 벽에 박아 도어 쪽 자유 공간을 남겨 작은 박스 끼워넣기 용이.
+   * 손 실험 X=326 패턴 자동화. 기본 ON. false 면 기존 EP 자연 배치.
+   */
+  deepAnchor?: boolean;
 }
 
 interface ContainerLike {
@@ -171,6 +178,7 @@ function tryPlaceColumn(
   col: ColumnDescriptor,
   state: ContainerPackState,
   spec: ContainerSpec,
+  deepAnchor: boolean,
 ): UnitItem[] {
   // doorHeight 초과면 column 자체 포기
   const doorH = spec.doorHeight ?? spec.innerHeight;
@@ -180,10 +188,20 @@ function tryPlaceColumn(
     if (!canStackPair(col.units[i + 1], col.units[i])) return col.units;
   }
 
-  // 첫 unit 을 자연스럽게 배치 (extreme-point 정상 호출)
+  // 첫 unit 배치
+  // 옵션 C 켜진 경우 — scoreFn 으로 컨테이너 안쪽 끝(y 최댓값) 후보 우선 lex 비교.
+  //   lex: -y * 1e8 + x * 1e4 + z (max y → min x → min z, 작을수록 우선)
+  //   tryPlaceUnit 내 모든 검증(충돌·지지·무게·face·topOnly) 그대로 재사용.
+  //   자리 못 찾으면 brute-force fallback.
   const first = col.units[0];
   const beforeCount = state.placements.length;
+  const deepFirstAttempt = deepAnchor
+    ? tryPlaceUnit(first, state, spec, {
+        scoreFn: (c) => -c.y * 1e8 + c.x * 1e4 + c.z,
+      })
+    : false;
   const ok =
+    deepFirstAttempt ||
     tryPlaceUnit(first, state, spec) ||
     tryPlaceUnitBruteForce(first, state, spec);
   if (!ok) return col.units;
@@ -376,6 +394,7 @@ export function preClusterFootprint(
 
   const minCbm = options?.minContainerCbm ?? MIN_CONTAINER_CBM;
   const minUnits = options?.minUnits ?? MIN_UNITS;
+  const deepAnchor = options?.deepAnchor !== false;
 
   // 활성 조건 검사
   const containerCbm =
@@ -403,7 +422,7 @@ export function preClusterFootprint(
     // 해당 column 의 unit 이 이미 다른 column 에서 처리됐을 수 있음 — eligible 재검사
     const stillFresh = col.units.every((u) => !placedIds.has(u.unitId));
     if (!stillFresh) continue;
-    const failedRest = tryPlaceColumn(col, containerLike.packState, containerLike.spec);
+    const failedRest = tryPlaceColumn(col, containerLike.packState, containerLike.spec, deepAnchor);
     // tryPlaceColumn 은 실패한 잔여 unit list 반환 ([] 이면 전부 배치)
     const placedInCol = col.units.filter((u) => !failedRest.includes(u));
     for (const u of placedInCol) placedIds.add(u.unitId);
@@ -455,6 +474,10 @@ export function preClusterFootprint(
   // **B1 보호 — 부킹 단위 atomic 후처리**:
   //   같은 부킹의 다른 cargo 가 partial 이면, 이 부킹 전체가 컨에 들어갈지 보장 못함.
   //   같은 부킹의 모든 placement 를 롤백해 placeQueueWrapper 가 booking anchor 로 묶도록.
+  //
+  //   부킹 단위 직접 partial 검출은 packBest evalKey 의 B1/B2 lex 우선순위에 위임.
+  //   사전 단계에서 부킹 분산 위험 발생해도 균형 스왑·매트릭스 best 선택이 위반 결과 차단.
+  //   여기선 cargoId partial 에서 파생된 부킹만 롤백 (보수적, 회귀 방지).
   const partialBookings = new Set<string>();
   for (const cargoId of partialCargoIds) {
     const units = poolByCargoId.get(cargoId) ?? [];

@@ -2063,22 +2063,69 @@ export function packBest(
 
   // 결과 평가 룰 (점수 없이 lexicographic 우선순위 비교):
   //   1순위 — 미배치 화물 수량 (적을수록 좋음)
-  //   2순위 — 입고완료 화물 마감 등급 (1컨최소=2, 1컨다른크기=1, 중립=0, 분산=음수)
-  //   3순위 — 평균 충전률 (높을수록 좋음)
+  //   2순위 — B1 위반 (CBM 쪼개기, cargoId 분산 ≥ 2 컨) 카운트 (적을수록 좋음, 절대 룰 #4)
+  //   3순위 — B2 위반 (부킹 분산 ≥ 2 컨) 카운트 (적을수록 좋음, 절대 룰 #4)
+  //   4순위 — 입고완료 화물 마감 등급 (1컨최소=2, 1컨다른크기=1, 중립=0, 분산=음수)
+  //   5순위 — 평균 충전률 (높을수록 좋음)
+  //   6순위 — 동종 컨 CBM 편차 (작을수록 균형 우선)
   //
-  // 이전엔 score = -unp*100000 + consolidationBonus + avgFillRate 합산점수였으나,
-  // unp 가중치가 압도적이라 사실상 lexicographic. 명시적 룰로 표현해 매직넘버 제거.
+  // B1/B2 우선순위는 2026-05-08 추가. 균형 스왑 단계가 fixedAssignment 로 cargoId 분산을
+  // 일으키면서도 충전률/균형 우수해서 best 로 채택되는 결함 차단. 옵션 C 도입과 함께 노출.
   interface EvalKey {
     unplacedCount: number;
+    b1Violations: number; // cargoId 분산 ≥ 2 컨 카운트
+    b2Violations: number; // bookingNo 분산 ≥ 2 컨 카운트
     consolidationTier: number; // 2=1컨최소, 1=1컨다른크기, 0=중립(입고완료 0건), 음수=분산(컨 수에 비례)
     fillRatePct: number;
     balancePenalty: number; // 컨테이너 간 CBM 편차 max — 작을수록 균형, 우선
   }
+  const countDistributionViolations = (
+    r: CLPResult,
+  ): { b1: number; b2: number } => {
+    const cargoCi = new Map<string, Set<number>>();
+    const bookingCi = new Map<string, Set<number>>();
+    r.containers.forEach((c) => {
+      for (const row of c.rows ?? []) {
+        for (const it of [...(row.bottomItems ?? []), ...(row.topItems ?? [])]) {
+          if (it.cargoId) {
+            const s = cargoCi.get(it.cargoId) ?? new Set<number>();
+            s.add(c.index);
+            cargoCi.set(it.cargoId, s);
+          }
+          if ((it as { bookingNo?: string }).bookingNo) {
+            const bn = (it as { bookingNo?: string }).bookingNo!;
+            const s = bookingCi.get(bn) ?? new Set<number>();
+            s.add(c.index);
+            bookingCi.set(bn, s);
+          }
+        }
+      }
+      for (const b of c.bulkItems ?? []) {
+        if (b.cargoId) {
+          const s = cargoCi.get(b.cargoId) ?? new Set<number>();
+          s.add(c.index);
+          cargoCi.set(b.cargoId, s);
+        }
+        if ((b as { bookingNo?: string }).bookingNo) {
+          const bn = (b as { bookingNo?: string }).bookingNo!;
+          const s = bookingCi.get(bn) ?? new Set<number>();
+          s.add(c.index);
+          bookingCi.set(bn, s);
+        }
+      }
+    });
+    let b1 = 0;
+    for (const s of cargoCi.values()) if (s.size > 1) b1++;
+    let b2 = 0;
+    for (const s of bookingCi.values()) if (s.size > 1) b2++;
+    return { b1, b2 };
+  };
   const evalKey = (r: CLPResult): EvalKey => {
     const unplacedCount = r.unplaced.reduce(
       (s, u) => s + (u.quantity ?? 1),
       0,
     );
+    const { b1, b2 } = countDistributionViolations(r);
     const completedContainersMap = new Map<number, ContainerPlan>();
     for (const c of r.containers) {
       for (const row of c.rows) {
@@ -2124,6 +2171,8 @@ export function packBest(
     }
     return {
       unplacedCount,
+      b1Violations: b1,
+      b2Violations: b2,
       consolidationTier,
       fillRatePct: r.summary.avgFillRate,
       balancePenalty,
@@ -2134,13 +2183,19 @@ export function packBest(
     // Rule 1: 미배치 적은 게 무조건 우선
     if (a.unplacedCount !== b.unplacedCount)
       return a.unplacedCount < b.unplacedCount;
-    // Rule 2: 입고완료 마감 등급 높은 쪽 우선 (2 > 1 > 0 > 음수)
+    // Rule 2: B1 위반 적은 쪽 우선 (절대 룰 #4 — CBM 쪼개기 금지)
+    if (a.b1Violations !== b.b1Violations)
+      return a.b1Violations < b.b1Violations;
+    // Rule 3: B2 위반 적은 쪽 우선 (부킹 분산 금지)
+    if (a.b2Violations !== b.b2Violations)
+      return a.b2Violations < b.b2Violations;
+    // Rule 4: 입고완료 마감 등급 높은 쪽 우선 (2 > 1 > 0 > 음수)
     if (a.consolidationTier !== b.consolidationTier)
       return a.consolidationTier > b.consolidationTier;
-    // Rule 3: 충전률 높은 쪽 우선
+    // Rule 5: 충전률 높은 쪽 우선
     if (Math.abs(a.fillRatePct - b.fillRatePct) > 0.001)
       return a.fillRatePct > b.fillRatePct;
-    // Rule 4: 동종 컨테이너 간 CBM 편차 작은 쪽 (균형 분배 우선)
+    // Rule 6: 동종 컨테이너 간 CBM 편차 작은 쪽 (균형 분배 우선)
     return a.balancePenalty < b.balancePenalty;
   };
 

@@ -210,6 +210,92 @@ describe("footprint-cluster: preClusterFootprint 룰 B — 흡수", () => {
   });
 });
 
+describe("footprint-cluster: 옵션 C — 안쪽 깊숙이 고정점", () => {
+  it("deepAnchor=true (기본) — 컬럼 첫 박스가 안쪽 끝(y 최댓값) 우선", () => {
+    const cont = {
+      index: 1,
+      spec: SPEC_40FT,
+      packState: makeContainerState(),
+    };
+    // 도어 근처에 미리 다른 박스 1 개 배치 — y=0 자리 점유
+    cont.packState.placements.push({
+      unitId: "occ",
+      cargoId: "occc",
+      shipper: "OCC",
+      bookingNo: "OCCB",
+      cargoType: "PL",
+      cfsCbm: null,
+      position: { x: 0, y: 0, z: 0 },
+      size: { width: 50, length: 50, height: 50 },
+      faceIdx: 0,
+      rotated: false,
+      weight: 100,
+      remarks: { noStacking: false, topOnly: false, orientation: "free", heavierBelow: false },
+      layer: "bottom",
+    });
+    cont.packState.candidates = [
+      { x: 0, y: 0, z: 0 },
+      { x: 50, y: 0, z: 0 },
+      { x: 0, y: 50, z: 0 },
+      { x: 0, y: 800, z: 0 }, // 안쪽 깊숙이 후보
+    ];
+
+    const units: UnitItem[] = [
+      mkUnit({ unitId: "u1", cargoId: "c1", bookingNo: "BK-X", width: 114, length: 114, height: 71, weight: 200 }),
+      mkUnit({ unitId: "u2", cargoId: "c1", bookingNo: "BK-X", width: 114, length: 114, height: 71, weight: 200 }),
+      mkUnit({ unitId: "u3", cargoId: "c1", bookingNo: "BK-X", width: 114, length: 114, height: 71, weight: 200 }),
+      mkUnit({ unitId: "u4", cargoId: "c2", bookingNo: "BK-Y", width: 50, length: 50, height: 50 }),
+      mkUnit({ unitId: "u5", cargoId: "c2", bookingNo: "BK-Y", width: 50, length: 50, height: 50 }),
+    ];
+    preClusterFootprint(cont, units);
+    const u1 = cont.packState.placements.find((p) => p.unitId === "u1");
+    assert.ok(u1, "u1 placement 존재");
+    // deepAnchor=true → 안쪽 끝 자리 후보(y=800) 선택
+    assert.equal(u1!.position.y, 800, "옵션 C: 안쪽 끝(y=800) 우선");
+  });
+
+  it("deepAnchor=false — 자연 EP 배치 (y 최솟값 우선)", () => {
+    const cont = {
+      index: 1,
+      spec: SPEC_40FT,
+      packState: makeContainerState(),
+    };
+    cont.packState.placements.push({
+      unitId: "occ",
+      cargoId: "occc",
+      shipper: "OCC",
+      bookingNo: "OCCB",
+      cargoType: "PL",
+      cfsCbm: null,
+      position: { x: 0, y: 0, z: 0 },
+      size: { width: 50, length: 50, height: 50 },
+      faceIdx: 0,
+      rotated: false,
+      weight: 100,
+      remarks: { noStacking: false, topOnly: false, orientation: "free", heavierBelow: false },
+      layer: "bottom",
+    });
+    cont.packState.candidates = [
+      { x: 50, y: 0, z: 0 },
+      { x: 0, y: 50, z: 0 },
+      { x: 0, y: 800, z: 0 },
+    ];
+
+    const units: UnitItem[] = [
+      mkUnit({ unitId: "u1", cargoId: "c1", bookingNo: "BK-X", width: 114, length: 114, height: 71, weight: 200 }),
+      mkUnit({ unitId: "u2", cargoId: "c1", bookingNo: "BK-X", width: 114, length: 114, height: 71, weight: 200 }),
+      mkUnit({ unitId: "u3", cargoId: "c1", bookingNo: "BK-X", width: 114, length: 114, height: 71, weight: 200 }),
+      mkUnit({ unitId: "u4", cargoId: "c2", bookingNo: "BK-Y", width: 50, length: 50, height: 50 }),
+      mkUnit({ unitId: "u5", cargoId: "c2", bookingNo: "BK-Y", width: 50, length: 50, height: 50 }),
+    ];
+    preClusterFootprint(cont, units, { deepAnchor: false });
+    const u1 = cont.packState.placements.find((p) => p.unitId === "u1");
+    assert.ok(u1, "u1 placement 존재");
+    // deepAnchor=false → y 최솟값 우선 (자연 EP)
+    assert.ok(u1!.position.y < 800, "옵션 C off: 도어 쪽 자리 선택");
+  });
+});
+
 describe("footprint-cluster: 옵션 비활성", () => {
   it("enabled=false 면 묶음 0", () => {
     const cont = {
