@@ -95,3 +95,42 @@ EXIT=1
   - 1ST SG TOTAL: baseline 도 0 미배치, 경량화 후도 0 미배치, 39초 내 완료
   - 2ST SG TOTAL: pack 시간 127ms (1번째 시도부터 미배치 0 도달 → outer break 즉시 발동)
   - 정답 hint X — 일반 룰 (조기 종료 + 컬럼 캐시) 만 추가
+
+
+=== 2026-05-08 16:11 긴 막대형 모서리 박음 → 차선책 모드 전환 (default OFF) ===
+
+변경 코드 (lib/packing/algorithm.ts):
+  1) 기본값 비활성: `const longAxisEnabled = options?.longAxisAnchor?.enabled === true;`
+     (이전: `!== false` → 기본 켜짐. 이제 호출자가 명시적으로 `enabled: true` 해야 발동)
+  2) packBest tryAllStrategies() 끝에 차선책 블록 추가
+     - 1차 56가지 매트릭스 끝나도 미배치 > 0 면
+     - longAxisAnchor:{enabled:true} 로 한 바퀴 더 시도
+     - lex 비교(미배치 → 마감 → 충전률 → 균형) 로 더 좋으면 갱신
+     - 사용자가 옵션 명시한 경우 차선책 발동 X (의도 존중)
+
+문서 갱신:
+  - docs/algorithm-pipeline.md 4.6단계 신규 +43 라인
+  - 헤더 line 4 마지막 갱신 노트 갱신
+
+검증 결과 (16:01–16:11):
+| # | 샘플       | 컨테이너         | visual unplaced | B1 위반 | 시간     | 회귀? |
+|---|-----------|-----------------|-----------------|---------|----------|-------|
+| 1 | 단위 테스트 | (n/a)           | -               | -       | 649ms    | NO (60/60 PASS) |
+| 2 | 1ST SG    | 40FT + 20FT     | 0               | 0       | 34725ms  | NO    |
+| 3 | 2ST SG    | 40FT × 2        | 0               | 0       | 48ms     | NO    |
+| 4 | 2ST HM    | 40FT × 2 + 20FT | 0               | 0       | 556ms    | NO    |
+| 5 | 3ST SG    | (packBest 매트릭스 실행 중 — 보고 시점 미완료) | - | - | - | 미확정 |
+
+추가 단독 결과 (pack() 단일 호출, 차선책 미발동 — single pack 은 packBest 가 아님):
+  - _quick-verify-3st-sg-c2.mjs: visual unplaced 1 (sg3-8 세아특수강 311×15×15)
+  → 예상된 동작. default OFF + 단일 pack() 호출이라 모서리 박음 발동 X.
+  → 실서비스 경로(packBest)에서는 차선책 자동 발동 → 0 도달 시도.
+
+차선책 발동 추정:
+  - 1ST/2ST SG, 2ST HM: 1차 매트릭스에서 미배치 0 도달 → 차선책 미발동 (회귀 0건)
+  - 3ST SG: 1차에서 unplaced > 0 → 차선책 트리거 (보고 시점 packBest 진행 중)
+
+핵심 효과:
+  - 단위 테스트 60/60 유지 (회귀 0)
+  - 1ST/2ST SG, 2ST HM 모두 0 미배치 + B1 위반 0 (회귀 0)
+  - 3ST SG packBest 결과는 다음 세션에서 추가 기록 필요

@@ -50,6 +50,10 @@ import {
   type FootprintClusterOptions,
 } from "./footprint-cluster.ts";
 import {
+  anchorLongAxisCargoes,
+  type LongAxisAnchorOptions,
+} from "./long-axis-anchor.ts";
+import {
   computeContainerRows,
   computeRowResiduals,
   tryFitInRowResiduals,
@@ -565,6 +569,21 @@ export interface PackOptions {
    * 비활성: { enabled: false }
    */
   footprintCluster?: FootprintClusterOptions;
+  /**
+   * 장축 모서리 박음(long-axis anchor) 사전 패스 옵션 — **기본 비활성 (default off)**.
+   *
+   * 활성 조건: 호출자가 명시적으로 { enabled: true } 로 켤 때만 발동.
+   * 그리고 화물 unit 중 최대 변 ≥ threshold (기본 300cm) 인 cargoId 가 있어야 의미 있음.
+   *
+   * 동작: 컨테이너 length 축에 가장 긴 변이 정렬되도록 강제 회전 + (x=0,y=0,z=0) 부터
+   *       X 모서리 라인을 따라 차례 anchor. 한 cargoId atomic, 한 부킹 = 한 컨 보호.
+   *
+   * packBest 가 일반 매트릭스에서 미배치가 발생하면 자동 fallback 으로
+   * { enabled: true } 1회 추가 시도. 일반 시나리오(이미 0 미배치) 는 영향 X.
+   *
+   * 활성: { enabled: true }
+   */
+  longAxisAnchor?: LongAxisAnchorOptions;
 }
 
 /** cm 단위 미세 좌표 비교 — extreme-point 내부 EPS 와 같은 수준이면 충분 */
@@ -1606,6 +1625,37 @@ export function pack(
     // 활성 조건 (보수적): 컨테이너 ≥ 50 m³ + unit 풀 ≥ 5개. 1ST SG 같은 작은 시나리오 영향 X.
     const fpClusterEnabled = options?.footprintCluster?.enabled !== false;
     const placedByPreCluster = new Set<string>();
+
+    // **장축 모서리 박음 (long-axis anchor) 사전 패스** — wrapper 모드 전용.
+    //
+    // footprint-cluster 보다 먼저 발동. 단행 막대형(311cm 같은) 박스가 작은 박스에
+    // 자리를 빼앗기지 않도록 컨테이너 length 축 모서리 라인을 따라 가장 먼저 anchor.
+    // 한 cargoId atomic + 한 부킹 = 한 컨 보호 + CBM 쪼개기 금지.
+    // 활성 조건: unit 중 최대 변 ≥ threshold (기본 300cm). 임계 미만이면 자동 우회.
+    // 기본 비활성 (default off). 호출자가 명시적으로 enabled: true 로 켜야 발동.
+    // packBest 의 fallback (미배치 발생 시 재시도) 에서 명시적으로 켠다.
+    const longAxisEnabled = options?.longAxisAnchor?.enabled === true;
+    if (longAxisEnabled && mode_placement === "wrapper") {
+      for (const cont of orderedContainers) {
+        const pool = generalUnits.filter((u) => {
+          if (placedByPreCluster.has(u.unitId)) return false;
+          const cands = candidatesFor(u);
+          return cands.includes(cont);
+        });
+        if (pool.length === 0) continue;
+        const placedIds = anchorLongAxisCargoes(
+          cont,
+          pool,
+          options?.longAxisAnchor,
+        );
+        for (const id of placedIds) {
+          placedByPreCluster.add(id);
+          const u = pool.find((x) => x.unitId === id);
+          if (u) recordBookingAnchor(u, cont);
+        }
+      }
+    }
+
     if (fpClusterEnabled && mode_placement === "wrapper") {
       for (const cont of orderedContainers) {
         // 이 컨테이너에 후보로 들어갈 수 있는 generalUnits 풀 산출
@@ -2104,6 +2154,40 @@ export function packBest(
               best = r;
             }
             if (bestKey !== null && bestKey.unplacedCount === 0) break outer;
+          }
+        }
+      }
+    }
+    // **장축 모서리 박음 fallback** — 일반 매트릭스에서 미배치가 남았으면
+    // longAxisAnchor: { enabled: true } 로 한 번 더 시도. 단행 막대형 박스 보호 룰.
+    // 호출자가 명시적으로 longAxisAnchor.enabled 를 지정했으면 (true/false 둘 다)
+    // 그 의도를 존중하고 fallback 발동 X.
+    const userPickedLongAxis = options?.longAxisAnchor?.enabled !== undefined;
+    if (
+      !userPickedLongAxis &&
+      bestKey !== null &&
+      bestKey.unplacedCount > 0
+    ) {
+      anchor: for (const strat of strategies) {
+        for (const co of containerOrders) {
+          for (const consolidate of consolidateModes) {
+            for (const pm of placementModes) {
+              const r = pack(input, mode, {
+                ...options,
+                sortStrategy: strat,
+                containerOrder: co,
+                autoConsolidateCompleted: consolidate,
+                placementMode: pm,
+                longAxisAnchor: { ...options?.longAxisAnchor, enabled: true },
+              });
+              const key = evalKey(r);
+              if (isBetterResult(key, bestKey)) {
+                bestKey = key;
+                best = r;
+              }
+              if (bestKey !== null && bestKey.unplacedCount === 0)
+                break anchor;
+            }
           }
         }
       }
