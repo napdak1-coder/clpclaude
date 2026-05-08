@@ -116,20 +116,36 @@ export function respectsOrientation(
   return true;
 }
 
+/** 글로벌 무게 룰 허용 비율 — 위 박스 무게 ≤ 아래 박스 무게 × 1.5 */
+export const STACK_WEIGHT_TOLERANCE = 1.5;
+
 /**
  * top 화물을 bottom 화물 위에 쌓아도 되는지 검사.
  * - bottom이 다단금지(noStacking)면 불가
- * - 중량조건(heavierBelow)이 어느 한 쪽이라도 켜져 있으면 bottom이 더 무거워야 함
+ * - **글로벌 무게 룰 (2026-05-08 강화)**: 위 박스 무게 ≤ 아래 박스 무게 × 1.5
+ *   (등가 OK + 50% 까지 허용 — 안전 + 회귀 균형).
+ *   heavierBelow 플래그 무관하게 모든 적층에 적용. 실무 안전 룰 (하단 박스 압축
+ *   파손 방지). 단, 양 쪽 무게가 모두 0 이상이고 어느 쪽이든 0 이면 무게 정보
+ *   누락으로 간주해 기존 heavierBelow 플래그 기반 체크만 적용 (데이터 누락 보호).
  */
 export function canStackOn(
   top: Pick<CargoSpec, "weightPerUnit" | "remarks">,
   bottom: Pick<CargoSpec, "weightPerUnit" | "remarks">,
 ): boolean {
   if (bottom.remarks.noStacking) return false;
-  const heavierBelowRequired =
-    top.remarks.heavierBelow || bottom.remarks.heavierBelow;
-  if (heavierBelowRequired && bottom.weightPerUnit < top.weightPerUnit) {
-    return false;
+  const bothWeightsKnown = top.weightPerUnit > 0 && bottom.weightPerUnit > 0;
+  if (bothWeightsKnown) {
+    // 글로벌 룰 — 위 무게가 아래 무게 × 허용비율 보다 무거우면 불가
+    if (top.weightPerUnit > bottom.weightPerUnit * STACK_WEIGHT_TOLERANCE) {
+      return false;
+    }
+  } else {
+    // 무게 정보 누락 케이스 — 기존 heavierBelow 플래그 기반 폴백
+    const heavierBelowRequired =
+      top.remarks.heavierBelow || bottom.remarks.heavierBelow;
+    if (heavierBelowRequired && bottom.weightPerUnit < top.weightPerUnit) {
+      return false;
+    }
   }
   return true;
 }
