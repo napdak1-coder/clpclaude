@@ -1,0 +1,51 @@
+/**
+ * 단독 pack() 속도 회복 검증 — 3ST SG TOTAL 을 그냥 pack() 한 번 호출.
+ * pack 본체 fallback 제거 후 < 30초 정상 (이전 baseline ~수초~수십초).
+ */
+import fs from "node:fs";
+import path from "node:path";
+
+const { pack } = await import("../lib/packing/algorithm.ts");
+
+const JSON_PATH = path.resolve("data/samples/singapore-total-3.json");
+const sample = JSON.parse(fs.readFileSync(JSON_PATH, "utf8"));
+const rows = sample.rows;
+
+const cargoes = rows.map((r, idx) => ({
+  id: `sg3-${idx + 1}`,
+  itemName: r.itemName || null,
+  actualShipperName: r.actualShipperName ?? "",
+  shipperName: r.shipperName ?? "",
+  width: r.widthCm ?? 0,
+  length: r.lengthCm ?? 0,
+  height: r.heightCm ?? 0,
+  quantity: Math.max(1, r.quantity ?? 1),
+  weightPerUnit: r.weightPerUnitKg ?? 0,
+  cbm: r.cbm ?? null,
+  aboutCbm: r.aboutCbm ?? null,
+  cargoType: r.cargoType ?? (r.widthCm > 0 ? "PL" : "CT"),
+  bookingNo: r.bookingNo || undefined,
+  unitSizes: r.unitSizes,
+  remarks: {
+    noStacking: r.noStacking ?? false,
+    topOnly: r.topOnly ?? false,
+    orientation: r.orientation ?? "free",
+    heavierBelow: r.heavierBelow ?? false,
+  },
+  itemRemark: r.itemRemark ?? "",
+}));
+
+console.log(`JSON 샘플: ${rows.length} 행 — 단독 pack() 호출 (fallback 없음 예상)`);
+
+const t0 = Date.now();
+const result = pack(cargoes, "auto");
+const elapsed = Date.now() - t0;
+
+const visualUnplaced = result.unplaced.filter(
+  (u) => u.group !== "ct" && u.group !== "completed",
+);
+console.log(`\n=== 결과 ===`);
+console.log(`소요: ${elapsed}ms`);
+console.log(`컨테이너: ${result.containers.length}대`);
+console.log(`visual unplaced: ${visualUnplaced.length}`);
+process.exit(0);

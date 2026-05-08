@@ -1946,6 +1946,10 @@ export function pack(
     ...bulkUnplaced,
   ];
 
+  // 장축 모서리 박음 fallback 은 packBest 단계에서만 동작.
+  // pack() 본체 내장 fallback 은 단독 pack() 단일 호출 시에도 매트릭스가 돌아가
+  // 성능 회귀(3ST SG 5분+) 가 발생하므로 제거. 보호는 packBest 의 anchor 루프 1곳만.
+
   // CT 카톤은 시각 좌표가 없어 컨테이너 그림에 안 그려진다.
   // 사용자가 어느 컨테이너에 카톤이 얼마나 들어갔는지 한눈에 보도록 정보성 알림 추가.
   if (ctTotalCbm > 0) {
@@ -2022,20 +2026,38 @@ function computeContainerLoadedCbm(c: ContainerState): number {
  * 백트래킹의 의미: 행 단위 사고가 아니라 컨테이너 전체를 두고 화물 입력 순서를 바꿔
  *                 가상 방 배치 시뮬레이션을 여러 번 해서 가장 좋은 결과를 채택.
  */
+/**
+ * packBest 전용 옵션 — 일반 PackOptions 에 매트릭스 가벼운 모드 토글 추가.
+ *  - lightMode=false (기본): 7전략 × 2컨순서 × 2자동마감 × 2배치 = 56시도 (회귀 0 보장)
+ *  - lightMode=true: 핵심 12 시도만 (시간 예산 부족 환경, 단독 검증, 빠른 회귀용).
+ *    내용: ldf/longest-side/tallest 정렬 × biggest-first × consolidate true/false × wrapper/pure
+ */
+export interface PackBestOptions extends PackOptions {
+  /**
+   * true 면 매트릭스 56 → 12 로 줄여 빠른 검증 가능.
+   * 기본 false — 회귀 0 보장 매트릭스 유지.
+   */
+  lightMode?: boolean;
+}
+
 export function packBest(
   cargoes: CargoSpec[],
   mode: ContainerMode,
-  options?: PackOptions,
+  options?: PackBestOptions,
 ): CLPResult {
-  const strategies: PackOptions["sortStrategy"][] = [
-    "ldf",
-    "longest-side",
-    "tallest",
-    "widest",
-    "input",
-    "shortest",
-    "shortest-height",
-  ];
+  const lightMode = options?.lightMode === true;
+  // lightMode: 가장 효과 좋은 2개 정렬만 (ldf=대각선 우선, longest-side=장축 우선)
+  const strategies: PackOptions["sortStrategy"][] = lightMode
+    ? ["ldf", "longest-side"]
+    : [
+        "ldf",
+        "longest-side",
+        "tallest",
+        "widest",
+        "input",
+        "shortest",
+        "shortest-height",
+      ];
 
   // 결과 평가 룰 (점수 없이 lexicographic 우선순위 비교):
   //   1순위 — 미배치 화물 수량 (적을수록 좋음)
@@ -2120,17 +2142,25 @@ export function packBest(
     return a.balancePenalty < b.balancePenalty;
   };
 
-  const containerOrders: PackOptions["containerOrder"][] = [
-    "biggest-first",
-    "smallest-first",
-  ];
-  const placementModes: PackOptions["placementMode"][] = ["wrapper", "pure"];
+  // lightMode: biggest-first 만 (smallest-first 는 회귀 시나리오에서 거의 best 안 됨)
+  const containerOrders: PackOptions["containerOrder"][] = lightMode
+    ? ["biggest-first"]
+    : ["biggest-first", "smallest-first"];
+  // placementModes: lightMode 는 wrapper 만 (pure 는 거의 동률)
+  const placementModes: PackOptions["placementMode"][] = lightMode
+    ? ["wrapper"]
+    : ["wrapper", "pure"];
   // 사용자 명시 옵션이 있으면 자동마감은 비활성 모드만 시도 (사용자 옵션 존중)
   const userPinned =
     options?.fixedAssignment != null ||
     typeof options?.completedExclusiveContainerIndex === "number" ||
     options?.autoConsolidateCompleted === false;
-  const consolidateModes: boolean[] = userPinned ? [false] : [true, false];
+  // lightMode: 자동마감 true 만 (false 는 입고완료 분산 → 거의 best 안 됨)
+  const consolidateModes: boolean[] = userPinned
+    ? [false]
+    : lightMode
+      ? [true]
+      : [true, false];
   const tryAllStrategies = (input: CargoSpec[]): CLPResult => {
     let best: CLPResult | null = null;
     let bestKey: EvalKey | null = null;
@@ -2200,7 +2230,8 @@ export function packBest(
   let currentKey = evalKey(current);
 
   // 2단계: 백트래킹 — 미배치 화물 우선 input 순으로 강제 (input strategy 만)
-  const MAX_BACKTRACK = 12;
+  // lightMode: 백트래킹 12 → 1회로 (시간 예산 보호; (a) input front 만 한 번 시도)
+  const MAX_BACKTRACK = lightMode ? 1 : 12;
   let inputOrder = [...cargoes];
   for (let iter = 0; iter < MAX_BACKTRACK; iter++) {
     if (current.unplaced.length === 0) break;
@@ -2224,19 +2255,22 @@ export function packBest(
     }
 
     // (b) 미배치 화물 1개씩 맨 앞으로 swap — 전체 전략 best 채택
-    for (const uid of unplacedIds) {
-      const reordered = [
-        ...inputOrder.filter((c) => c.id === uid),
-        ...inputOrder.filter((c) => c.id !== uid),
-      ];
-      const cand = tryAllStrategies(reordered);
-      const candKey = evalKey(cand);
-      if (isBetterResult(candKey, currentKey)) {
-        current = cand;
-        currentKey = candKey;
-        inputOrder = reordered;
-        improved = true;
-        break;
+    // lightMode: (b) 스킵 — 매 unplacedId 마다 매트릭스 재호출이라 매우 느림
+    if (!lightMode) {
+      for (const uid of unplacedIds) {
+        const reordered = [
+          ...inputOrder.filter((c) => c.id === uid),
+          ...inputOrder.filter((c) => c.id !== uid),
+        ];
+        const cand = tryAllStrategies(reordered);
+        const candKey = evalKey(cand);
+        if (isBetterResult(candKey, currentKey)) {
+          current = cand;
+          currentKey = candKey;
+          inputOrder = reordered;
+          improved = true;
+          break;
+        }
       }
     }
     if (!improved) break;
@@ -2247,7 +2281,8 @@ export function packBest(
   // 3단계: 동종(같은 spec) 컨 간 balance-swap — 미배치 0 + 동종 컨 2+ 인 경우만 시도.
   //   현재 분배에서 cargo 1개 또는 swap 한 쌍 이동으로 balance 개선되면 채택.
   //   fixedAssignment 옵션으로 강제 후 재pack → 룰 통과 + balance 개선이면 갱신.
-  if (current.unplaced.length === 0 && current.containers.length >= 2) {
+  //   lightMode: 시간 예산 부족 시 균형 스왑 단계 통째 스킵 (미배치 0 보장이 우선).
+  if (!lightMode && current.unplaced.length === 0 && current.containers.length >= 2) {
     const cargoToContainer = new Map<string, number>();
     for (const c of current.containers) {
       for (const row of c.rows) {

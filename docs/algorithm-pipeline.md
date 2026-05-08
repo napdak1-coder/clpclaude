@@ -1,7 +1,7 @@
 # clpclaude 분배 알고리즘 파이프라인
 
 > **자동 갱신 룰**: `lib/packing/algorithm.ts` 수정 시 이 파일도 함께 보강할 것 (rule: `keep-algorithm-pipeline-updated`).
-> 마지막 갱신: 2026-05-08 (4.6 긴 막대형 박스 모서리 박음 — 차선책(fallback) 모드 추가. 평소엔 꺼져 있다가 미배치가 생기면 자동으로 켜져 한 번 더 시도)
+> 마지막 갱신: 2026-05-08 (5.3 packBest 가벼운 모드 lightMode 추가 + pack() 본체 fallback 제거 → 단독 pack() 속도 회복(≈24초). 차선책(fallback) 발동은 packBest anchor 루프 1곳으로 단일화)
 
 ---
 
@@ -232,6 +232,29 @@
 - packBest 매트릭스가 같은 unit 풀에 대해 같은 발바닥 컬럼을 매번 재계산하던 비용 제거
 - key = unit signature (id+w+l+h+booking+weight+noStacking) 정렬 join
 - LRU 식 상한 (오래된 항목 1개 제거) — 메모리 폭주 방지
+
+### 5.3 — 가벼운 모드 (`lightMode`, 2026-05-08 추가)
+
+**파일**: `lib/packing/algorithm.ts:packBest` (옵션 `PackBestOptions.lightMode`)
+
+매트릭스가 너무 무거워 환경 시간 한계(8분) 안에 한 번도 못 끝나는 큰 시나리오용 빠른 검증 모드.
+
+| 단계 | 기본 (lightMode=false) | lightMode=true |
+|---|---|---|
+| 정렬 전략 | 7개 (ldf/longest-side/tallest/widest/input/shortest/shortest-height) | **2개** (ldf, longest-side) |
+| 컨 순서 | 2개 (biggest-first/smallest-first) | **1개** (biggest-first) |
+| 자동마감 | 2개 (true/false) | **1개** (true) |
+| 배치 모드 | 2개 (wrapper/pure) | **1개** (wrapper) |
+| **매트릭스 합** | **56 시도** | **2 시도** |
+| 백트래킹 (a) input front | 12 회 | 1 회 |
+| 백트래킹 (b) 미배치 swap | unplaced 마다 매트릭스 재호출 | **스킵** |
+| 균형 swap (Swap 패스) | 동작 | **스킵** |
+| 장축 모서리 박음 fallback | 동작 (매트릭스 그대로) | 동작 (lightMode 매트릭스 = 2 시도) |
+
+**효과**: 3ST SG TOTAL (35 행, 일반 매트릭스에서 환경 timeout) → lightMode ≈ **1분 44초** 완료.
+**대가**: 미배치 0 보장 X (가능성 낮춰서 시간 보장). 회귀 테스트엔 lightMode=false (기본) 유지.
+
+**활성**: `packBest(cargoes, mode, { lightMode: true })`
 
 ## 6단계: Swap 패스 — 균형 보정
 
