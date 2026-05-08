@@ -1,0 +1,37 @@
+=== 3ST SG TOTAL 컨2 — VPHI cluster 실험 BEST ===
+시나리오: vphi-326/sg-auto/ldf/seed=0
+미배치: 1/27
+총 trial: 1800, 런타임: 320.3s
+총 부피: 43.05 m³
+총 무게: 12907 kg
+
+--- 배치 (26개) ---
+  [sg3-30] FLOWBUS 116×326×110 at (0,0,0) face=1 1880kg
+  [sg3-30] FLOWBUS 116×326×110 at (116,0,0) face=1 1880kg
+  [sg3-22] VPHI 111×111×104 at (0,326,0) face=0 375.5kg
+  [sg3-22] VPHI 111×111×104 at (0,326,104) face=0 375.5kg
+  [sg3-25] VPHI 114×114×71 at (111,326,0) face=0 250kg
+  [sg3-25] VPHI 114×114×71 at (111,326,71) face=0 250kg
+  [sg3-25] VPHI 114×114×71 at (111,326,142) face=0 250kg
+  [sg3-23] VPHI 114×114×71 at (0,440,0) face=0 375.5kg
+  [sg3-23] VPHI 114×114×71 at (0,440,71) face=0 375.5kg
+  [sg3-24] VPHI 114×114×71 at (0,440,142) face=0 186kg
+  [sg3-24] VPHI 114×114×71 at (114,440,0) face=0 186kg
+  [sg3-35] SK GEO CENTRIC 135×115×129 at (0,554,0) face=0 875kg
+  [sg3-35] SK GEO CENTRIC 135×115×129 at (0,669,0) face=0 875kg
+  [sg3-35] SK GEO CENTRIC 85×115×137 at (135,554,0) face=5 875kg
+  [sg3-26] ANC LOGISTICS 176×151×164 at (0,784,0) face=0 400kg
+  [sg3-34] KSB 143×101×195 at (0,935,0) face=0 344kg
+  [sg3-26] ANC LOGISTICS 117×113×194 at (0,1036,0) face=0 400kg
+  [sg3-26] ANC LOGISTICS 87×99×199 at (135,669,0) face=4 400kg
+  [sg3-20] 삼성전자 114×114×112 at (117,1036,0) face=0 135kg
+  [sg3-26] ANC LOGISTICS 87×99×168 at (143,935,0) face=4 400kg
+  [sg3-31] 삼성전자 113×99×128 at (114,440,71) face=0 455kg
+  [sg3-32] 제일기공 107×91×147 at (117,1036,112) face=4 629kg
+  [sg3-26] ANC LOGISTICS 110×110×102 at (0,784,164) face=0 400kg
+  [sg3-21] 삼성전자 111×111×68 at (0,1036,194) face=0 64kg
+  [sg3-33] 씨엔스타 61×91×104 at (110,784,164) face=1 136kg
+  [sg3-20] 삼성전자 38×114×114 at (176,784,0) face=3 135kg
+
+--- 미배치 (1개) ---
+  [sg3-27] 한도신소재 110×110×93 450kg

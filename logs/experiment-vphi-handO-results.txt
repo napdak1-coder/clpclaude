@@ -1,0 +1,5 @@
+=== VPHI+한도 cluster — 전체 시나리오 ===
+총 trial: 31, 런타임: 5.1s
+
+recipe  anchor      sort          best미배치
+R1      vphi-326    tall-first    1

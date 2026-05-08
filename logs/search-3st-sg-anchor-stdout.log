@@ -1,0 +1,12 @@
+(node:56848) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/napda/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/clpclaude/lib/packing/extreme-point.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\Users\napda\OneDrive\바탕 화면\clpclaude\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+c2Units=27, flowbus=2, skGeo=3, anc=5, ksb=1, others=16
+=== 3ST SG TOTAL 컨2 anchor-first search ===
+portfolio: 10 scenarios × 8 sort × 25 seed = 2000 trials
+최대 시간: 8분
+
+[2.3s][trial 1] A1/tall-first/seed=0 미배치 6 ⭐ best
+[2.4s][trial 2] A1/tall-first/seed=2654435761 미배치 2 ⭐ best
+[3.1s][trial 4] A1/tall-first/seed=3668339987 미배치 1 ⭐ best

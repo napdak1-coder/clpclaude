@@ -1,0 +1,38 @@
+=== 3ST SG TOTAL 컨2 search BEST ===
+전략: FB-A / SG-A / tall-first / seed=147926525
+미배치: 1/27
+런타임: 5.9s
+총 부피: 39.82 m³
+총 무게: 12964 kg
+이유: 나머지 미배치
+
+--- 배치 (26개) ---
+  [sg3-30] FLOWBUS 116×326×110 at (0,0,0) face=1 1880kg
+  [sg3-30] FLOWBUS 116×326×110 at (116,0,0) face=1 1880kg
+  [sg3-35] SK GEO CENTRIC 135×115×129 at (0,326,0) face=0 875kg
+  [sg3-35] SK GEO CENTRIC 135×115×129 at (0,441,0) face=0 875kg
+  [sg3-35] SK GEO CENTRIC 85×137×115 at (135,326,0) face=3 875kg
+  [sg3-22] VPHI 111×111×104 at (0,556,0) face=0 1315.5kg
+  [sg3-25] VPHI 71×114×114 at (111,556,0) face=3 0kg
+  [sg3-26] ANC LOGISTICS 117×113×194 at (0,670,0) face=0 400kg
+  [sg3-33] 씨엔스타 91×61×104 at (135,463,0) face=0 136kg
+  [sg3-23] VPHI 114×71×114 at (117,670,0) face=2 0kg
+  [sg3-26] ANC LOGISTICS 99×87×168 at (0,783,0) face=5 400kg
+  [sg3-25] VPHI 114×71×114 at (117,741,0) face=2 0kg
+  [sg3-25] VPHI 114×71×114 at (117,812,0) face=2 0kg
+  [sg3-20] 삼성전자 38×114×114 at (182,556,0) face=3 135kg
+  [sg3-20] 삼성전자 114×114×112 at (0,870,0) face=0 135kg
+  [sg3-31] 삼성전자 113×99×128 at (117,883,0) face=0 455kg
+  [sg3-24] VPHI 114×71×114 at (117,982,0) face=2 0kg
+  [sg3-23] VPHI 114×71×114 at (117,1053,0) face=2 0kg
+  [sg3-22] VPHI 111×104×111 at (0,984,0) face=2 1315.5kg
+  [sg3-34] KSB 101×195×143 at (117,670,114) face=4 344kg
+  [sg3-21] 삼성전자 111×111×68 at (0,1088,0) face=0 64kg
+  [sg3-26] ANC LOGISTICS 87×99×199 at (0,1088,68) face=4 400kg
+  [sg3-24] VPHI 114×71×114 at (117,1124,0) face=2 0kg
+  [sg3-32] 제일기공 107×91×147 at (0,556,104) face=4 629kg
+  [sg3-27] 한도신소재 110×93×110 at (0,984,111) face=2 450kg
+  [sg3-26] ANC LOGISTICS 110×110×102 at (0,870,112) face=0 400kg
+
+--- 미배치 (1개) ---
+  [sg3-26] ANC LOGISTICS 176×151×164 400kg

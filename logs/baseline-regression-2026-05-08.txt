@@ -1,0 +1,37 @@
+=== BASELINE REGRESSION 2026-05-08 (in progress) ===
+algorithm.ts read-only capture before enhancement work.
+
+| # | 스크립트                              | 미배치 | 부피/무게 (요약)                                | PASS/FAIL    |
+|---|---------------------------------------|--------|--------------------------------------------------|--------------|
+| 1 | verify-1st-sg-total                   |   0    | 컨1 50.75/75.25 m³(67.4%), 19690.9 kg / 컨2 22.98/32.86 m³(69.9%), 5981.0 kg | 14 pass / 0 fail |
+| 2 | verify-1st-sg-practitioner            |  대기  | (실행 중 — AUTO packBest 단계)                   | 미수집       |
+| 3 | verify-2st-sg-total                   |  대기  | (실행 중)                                         | 미수집       |
+| 4 | verify-2st-sg-physics                 |  대기  | (실행 중)                                         | 미수집       |
+| 5 | verify-2st-hm-total                   |  대기  | (실행 중 — 26 화주 packBest)                     | 미수집       |
+| 6 | verify-2st-hm-physics                 |  대기  | (실행 중 — 26 화주 packBest)                     | 미수집       |
+| 7 | verify-3st-sg-total                   |  대기  | (실행 중 — 35 화주 packBest)                     | 미수집       |
+| 8 | verify-3st-sg-physics                 |  대기  | (실행 중)                                         | 미수집       |
+| 9 | verify-3st-sg-practitioner            |   1    | 컨1 46.79/75.25 m³(62.2%), 18616.3 kg / 컨2 41.40/75.25 m³(55.0%), 11853.0 kg ; 미배치=SK GEO sg3-35 (135×115×129, 5.344 m³, 2625 kg) | 13 pass / 1 fail |
+| 10| unit tests (algorithm/EP/clustering)  |   -    | 40 tests, 25 suites, 859 ms                      | 40 pass / 0 fail |
+
+전체 PASS/FAIL 카운트 (3/10 스크립트 기준):
+  - 회귀 스크립트 PASS: 1 / FAIL: 1 / 미수집: 7
+  - 단위 테스트: 40 / 40 통과
+
+알려진 baseline 미배치:
+  - 3ST SG: SK GEO CENTRIC sg3-35  (1 unit, 135×115×129 cm, 5.344 m³, 2625 kg)
+
+알려진 baseline PASS 화주 (1ST SG):
+  - 컨1(40FT): 메가젠임플란트, 데코론, YKMC, 보현석재, 에이제이테크, 카페봄봄,
+              EXCELERATE ENERGY, VISCOSMO, 더블유티 스프레이, 리만, 대한정밀공업,
+              선진뷰티사이언스, SUNGBO INDUSTRIA, 제일기공, 웨스코, 디에스콘, 티케이테크
+  - 컨2(20FT): AWOT, 대원산업, 씨에스에프, HD현대건설기계, 포컴퍼니
+
+알려진 baseline 화주 (3ST SG, 1 unit unplaced):
+  - 컨1(40FT): 나투라미디어, SMI, 폰브, 디네오, 삼원코브라, 원신, 광성텍, 세아특수강,
+              현승아이앤씨, 롯데케미칼, 성안기계, DSSB, 대동, 위너스마린, 카버코리아,
+              리틀스푼, SUNGSHINTECH, 에스앤비테크, 나라오토시스
+  - 컨2(40FT): 삼성전자, 삼성전자, VPHI, VPHI, VPHI, VPHI, ANC LOGISTICS, 한도신소재,
+              지케이씨, 애쉬랜드, FLOWBUS, 삼성전자, 제일기공, 씨엔스타, KSB, SK GEO CENTRIC
+
+남은 7개 스크립트는 백그라운드 실행 중이며, 완료 시 본 파일에 추가 기록 예정.
