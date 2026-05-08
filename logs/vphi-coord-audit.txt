@@ -1,0 +1,37 @@
+JSON 샘플 로드: 35 행
+
+=== 입력 데이터: VPHI 부킹 FBSIN260400 4행 ===
+  sg3-22 (VPHI) 111x111x104 qty=2 weight/unit=751kg
+  sg3-23 (VPHI) 114x114x71 qty=2 weight/unit=751kg
+  sg3-24 (VPHI) 114x114x71 qty=2 weight/unit=373kg
+  sg3-25 (VPHI) 114x114x71 qty=3 weight/unit=751kg
+
+=== pack() 실행 (footprintCluster ON) ===
+소요: 22735ms
+컨테이너: 2대 — 40FT, 40FT
+전체 unplaced: 1
+
+=== VPHI 부킹 (FBSIN260400) unit 위치 추적 ===
+
+--- VPHI unit 컨테이너 분포 ---
+[컨1] VPHI unit 9개:
+  sg3-25 | (x=0, y=263, z=top) | 114x71x114 | 250kg | row#1
+  sg3-22 | (x=0, y=376, z=bottom) | 111x111x104 | 375.5kg | row#2
+  sg3-22 | (x=0, y=487, z=top) | 111x111x104 | 375.5kg | row#2
+  sg3-23 | (x=0, y=1024, z=bottom) | 114x114x71 | 375.5kg | row#4
+  sg3-24 | (x=114, y=1024, z=bottom) | 71x114x114 | 186kg | row#4
+  sg3-23 | (x=0, y=1138, z=top) | 114x114x71 | 375.5kg | row#4
+  sg3-25 | (x=0, y=1252, z=top) | 114x114x71 | 250kg | row#4
+  sg3-24 | (x=114, y=1138, z=top) | 71x114x114 | 186kg | row#4
+  sg3-25 | (x=0, y=1636, z=top) | 114x114x71 | 250kg | row#5
+
+VPHI 총 unit: 9개 (예상 9개: 2+2+2+3)
+
+=== B1 부킹 분산 위반 판정 ===
+VPHI unit 분산 컨테이너 수: 1
+B1 위반: ❌ N (한 컨에 모임, OK)
+
+=== 다른 부킹 분산 검사 (sg3-20·21·31) ===
+  FBSIN260343: 2 unit, 1 컨테이너 (컨1=2) — 단일
+  FBSIN260344: 1 unit, 1 컨테이너 (컨2=1) — 단일
+  FBSIN260423: 1 unit, 1 컨테이너 (컨2=1) — 단일

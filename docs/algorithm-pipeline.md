@@ -1,7 +1,7 @@
 # clpclaude 분배 알고리즘 파이프라인
 
 > **자동 갱신 룰**: `lib/packing/algorithm.ts` 수정 시 이 파일도 함께 보강할 것 (rule: `keep-algorithm-pipeline-updated`).
-> 마지막 갱신: 2026-05-08 (5.3 packBest 가벼운 모드 lightMode 추가 + pack() 본체 fallback 제거 → 단독 pack() 속도 회복(≈24초). 차선책(fallback) 발동은 packBest anchor 루프 1곳으로 단일화)
+> 마지막 갱신: 2026-05-08 (4.5 발바닥 사전 묶음에 cargoId·부킹 atomic 후처리 추가 — 한 화물(cargoId)의 일부 박스만 사전 배치되면 그 화물의 사전 배치를 모두 되돌려 정식 배치 단계가 한 컨에 통째로 처리. 3ST SG VPHI B1·CBM 쪼개기 위반 해결)
 
 ---
 
@@ -37,6 +37,18 @@
 - 사용자가 `fixedAssignment` 또는 `completedExclusiveContainerIndex` 명시 시 자동 모드 비활성
 
 ## 4단계: 화물을 두 갈래로 나눠 배치
+
+### 분기 기준 — **사이즈 우선** (cargoType 라벨 무시)
+
+**파일**: `lib/packing/algorithm.ts:classify`
+
+| 입력 화물 | 가는 통로 |
+|---|---|
+| W·L·H 모두 ≥ 1cm (또는 unitSizes 가 모두 양수) | **통로 B 시각 적재** (cargoType 가 CT 라도 시각화) |
+| 사이즈 없음 (W/L/H ≤ 0 + unitSizes 도 비어있음) | **통로 A CT 벌크** (CBM 합산만) |
+| 모든 행이 c.cbm 입력 + 화물 ≥ 2개 | **통로 A 전체 위임** (전부 입고완료 출하 케이스) |
+
+→ "사이즈 적힌 건 다 시각" 룰 보장. cargoType 은 화면 라벨/색 구분 등에만 사용.
 
 ### 통로 A — 박스 무더기 (CT/입고완료, 무차원)
 
@@ -108,6 +120,20 @@
 | 비활성 옵션 | `options.footprintCluster.enabled = false` |
 
 → 1ST SG 같은 20FT 적은 박스 시나리오는 자동 우회.
+
+### 룰 C — 화물·부킹 atomic 후처리 (2026-05-08 추가)
+
+사전 묶음이 한 화물(cargoId)의 박스 일부만 깔고 나머지는 못 깔면 **CBM 쪼개기 위반**(절대 룰 #4) 위험.
+같은 부킹의 다른 화물이 partial 이면 **B1 위반**(부킹 분산) 위험.
+
+| 단계 | 동작 |
+|---|---|
+| 사전 묶음 종료 후 검사 | 풀 안 미배치 박스가 남은 cargoId 들 모음 (= partial cargo) |
+| 부킹 확장 | partial cargo 가 속한 부킹들 모두 partial 부킹으로 표시 |
+| 롤백 | partial cargo + partial 부킹의 사전 배치 placement 모두 제거 |
+| 후속 단계 | placeQueueWrapper 가 통째로(atomic) 재배치 |
+
+**효과 (3ST SG VPHI):** 사전 단계가 sg3-23 같은 cargo 의 박스 일부만 컨1 에 깔면 모두 되돌리고, 정식 단계가 부킹 9 박스를 컨1 에 통째로 처리.
 
 ### 예시 — 3ST SG 컨2 VPHI 케이스
 

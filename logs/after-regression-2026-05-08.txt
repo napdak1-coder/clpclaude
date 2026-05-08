@@ -182,3 +182,38 @@ EXIT=1
   - 3ST SG 미배치 1건 (sg3-35 SK GEO CENTRIC 135×115×129 qty=3) 은 lightMode/default 둘 다 동일.
     무거운 매트릭스(56) 회귀로 0 도달 가능성 별도 탐색 필요 (현재 환경 제약상 미확인)
   - lightMode 는 "빠른 회귀 체크용" 으로만 사용. 본운영 채택 결정엔 default(false) 결과 권장
+
+================================================================================
+[2026-05-08 추가 패치] footprint-cluster cargoId·부킹 atomic 후처리
+================================================================================
+
+수정 파일: lib/packing/footprint-cluster.ts (preClusterFootprint 끝부분 +50줄)
+
+변경 요지:
+  사전 묶음(룰 A + 룰 B) 종료 후, 풀(unitPool) 에 미배치 unit 이 남은 cargoId 의
+  partial placement 와 같은 booking 의 모든 placement 를 롤백.
+  → CBM 쪼개기 (절대 룰 #4) + B1 부킹 분산 위반 방지.
+
+회귀 매트릭스
+| 샘플                       | 결과            | B1   | CBM 쪼개기 | 회귀 |
+|----------------------------|-----------------|------|------------|------|
+| 3ST SG VPHI audit          | 1/35 미배치(이전과 동일) | 0건  | 0건        | -    |
+|   VPHI 9 unit              | 컨1 단일 (이전 5/4 분산) | 해결 | 해결       | -    |
+| 2ST HM physics             | 33/33 PASS, 0미배치 | 0건  | 0건        | NO   |
+| 1ST SG TOTAL               | 0 미배치, 컨셋 일치    | -    | -          | NO   |
+| 2ST SG TOTAL               | 0 미배치, 100% 일치   | -    | -          | NO   |
+| algorithm.test.ts          | 10/10 PASS      | -    | -          | NO   |
+| footprint-cluster.test.ts  | 10/10 PASS      | -    | -          | NO   |
+| clustering+ep+long-axis    | 40/40 PASS      | -    | -          | NO   |
+
+VPHI before/after 비교:
+  before: [컨1] 5 unit (sg3-23×1, sg3-25×3, sg3-23×1) + [컨2] 6 unit (sg3-22×2, sg3-23×1, sg3-24×2, sg3-23×1)
+          → B1 위반 (FBSIN260400 부킹 두 컨 분산)
+          → CBM 쪼개기 위반 (sg3-23 두 컨, sg3-25 두 컨)
+  after:  [컨1] 9 unit 모두 — sg3-22×2, sg3-23×2, sg3-24×2, sg3-25×3
+          → B1 OK (단일 컨), CBM 쪼개기 OK
+
+문서: docs/algorithm-pipeline.md
+  - "분기 기준 — 사이즈 우선" 표 신설 (4단계)
+  - 4.5단계에 "룰 C — 화물·부킹 atomic 후처리" 섹션 추가
+  - 헤더 "마지막 갱신" 일자·요지 갱신

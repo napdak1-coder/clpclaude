@@ -434,6 +434,57 @@ export function preClusterFootprint(
     if (!remaining.includes(u)) placedIds.add(u.unitId);
   }
 
+  // **CBM 쪼개기 방지 — cargoId atomic 후처리**:
+  //   pre-cluster 가 한 cargoId 의 unit 일부만 배치하면 후속 컨테이너 루프에서 나머지가
+  //   다른 컨에 들어가 cargo 쪼개기 (절대 룰 #4) 가 발생.
+  //   풀(unitPool) 안에 미배치 unit 이 남은 cargoId 의 모든 placement 를 이 컨에서 롤백.
+  //   → 그 cargo 는 정식 placeQueueWrapper 가 atomic 으로 처리.
+  const poolByCargoId = new Map<string, UnitItem[]>();
+  for (const u of unitPool) {
+    const list = poolByCargoId.get(u.cargoId) ?? [];
+    list.push(u);
+    poolByCargoId.set(u.cargoId, list);
+  }
+  const partialCargoIds = new Set<string>();
+  for (const [cargoId, units] of poolByCargoId) {
+    const placedCount = units.filter((u) => placedIds.has(u.unitId)).length;
+    if (placedCount > 0 && placedCount < units.length) {
+      partialCargoIds.add(cargoId);
+    }
+  }
+  // **B1 보호 — 부킹 단위 atomic 후처리**:
+  //   같은 부킹의 다른 cargo 가 partial 이면, 이 부킹 전체가 컨에 들어갈지 보장 못함.
+  //   같은 부킹의 모든 placement 를 롤백해 placeQueueWrapper 가 booking anchor 로 묶도록.
+  const partialBookings = new Set<string>();
+  for (const cargoId of partialCargoIds) {
+    const units = poolByCargoId.get(cargoId) ?? [];
+    for (const u of units) {
+      if (u.bookingNo) partialBookings.add(u.bookingNo);
+    }
+  }
+  if (partialCargoIds.size > 0 || partialBookings.size > 0) {
+    const state = containerLike.packState;
+    const keep: Placement3D[] = [];
+    let removedWeight = 0;
+    let removedCbm = 0;
+    for (const p of state.placements) {
+      const cargoSplit = partialCargoIds.has(p.cargoId);
+      const bookingSplit = !!p.bookingNo && partialBookings.has(p.bookingNo);
+      if (cargoSplit || bookingSplit) {
+        // 롤백 — 이 placement 제거
+        removedWeight += p.weight;
+        removedCbm += (p.size.width * p.size.length * p.size.height) / 1_000_000;
+        placedIds.delete(p.unitId);
+        continue;
+      }
+      keep.push(p);
+    }
+    state.placements = keep;
+    state.totalWeight -= removedWeight;
+    state.visualCbm -= removedCbm;
+    // candidates 는 tryPlaceUnit 다음 호출 시 자연스럽게 회복되므로 그대로 둠
+  }
+
   return placedIds;
 }
 
