@@ -532,7 +532,8 @@ export interface PackOptions {
     | "tallest"
     | "widest"
     | "shortest"
-    | "shortest-height";
+    | "shortest-height"
+    | "heaviest";
   /**
    * 컨테이너 후보 순서 — 자유 분배 시 어떤 컨테이너를 먼저 시도할지.
    *  - "biggest-first" (기본): 입력 순서 그대로 (보통 40FT > 20FT)
@@ -1061,6 +1062,18 @@ export function pack(
         case "shortest-height":
           // 낮은 높이 화물 먼저 — bottom 깔리고 다단 잘 됨
           return a.height - b.height;
+        case "heaviest": {
+          // 무거운 거 먼저 — 무거운 박스가 z=0 (바닥) 자리 우선 점유 → 가벼운 박스가
+          // 위로 자연 쌓임. 컬럼 안 무거운 거 아래 자동 정렬.
+          // 동률(같은 무게)은 부피 desc → 긴 변 desc 로 tiebreak (ldf 와 동일).
+          if (b.weight !== a.weight) return b.weight - a.weight;
+          const va = a.width * a.length * a.height;
+          const vb = b.width * b.length * b.height;
+          if (vb !== va) return vb - va;
+          const longA = Math.max(a.width, a.length, a.height);
+          const longB = Math.max(b.width, b.length, b.height);
+          return longB - longA;
+        }
         case "ldf":
         default: {
           const va = a.width * a.length * a.height;
@@ -2050,7 +2063,7 @@ export function packBest(
   const lightMode = options?.lightMode === true;
   // lightMode: 가장 효과 좋은 2개 정렬만 (ldf=대각선 우선, longest-side=장축 우선)
   const strategies: PackOptions["sortStrategy"][] = lightMode
-    ? ["ldf", "longest-side"]
+    ? ["ldf", "longest-side", "heaviest"]
     : [
         "ldf",
         "longest-side",
@@ -2059,6 +2072,7 @@ export function packBest(
         "input",
         "shortest",
         "shortest-height",
+        "heaviest",
       ];
 
   // 결과 평가 룰 (점수 없이 lexicographic 우선순위 비교):
