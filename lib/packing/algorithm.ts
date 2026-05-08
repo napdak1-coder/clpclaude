@@ -46,6 +46,10 @@ import {
 import { allowedFaces, effectiveSizeFace } from "./constraints.ts";
 import { computeDisplayRows } from "./display-rows.ts";
 import {
+  preClusterFootprint,
+  type FootprintClusterOptions,
+} from "./footprint-cluster.ts";
+import {
   computeContainerRows,
   computeRowResiduals,
   tryFitInRowResiduals,
@@ -549,6 +553,18 @@ export interface PackOptions {
    * packBest 가 양쪽 다 시도해 best 선택.
    */
   placementMode?: "wrapper" | "pure";
+  /**
+   * Footprint cluster 사전 묶음 옵션 — 기본 활성 (큰 컨테이너에서만 발동).
+   *
+   * 룰 A: 같은 부킹의 동일 footprint unit 자체 컬럼 사전 적층.
+   * 룰 B: 그 컬럼 위에 다른 부킹의 작은 footprint 박스 흡수 (받침 ≥ 70%).
+   *
+   * 활성 조건 (기본): 컨테이너 부피 ≥ 50 m³ + unit 풀 ≥ 5개.
+   * 작은 시나리오 (1ST SG 등) 자동 비활성.
+   *
+   * 비활성: { enabled: false }
+   */
+  footprintCluster?: FootprintClusterOptions;
 }
 
 /** cm 단위 미세 좌표 비교 — extreme-point 내부 EPS 와 같은 수준이면 충분 */
@@ -1578,10 +1594,44 @@ export function pack(
     placeQueuePure(completedTop);
     placeQueueWrapper(otherTop);
   } else {
+    // **Footprint cluster 사전 묶음 (룰 A + 룰 B)** — wrapper 모드 전용, 큰 컨테이너만
+    //
+    // 큰 컨테이너 (40FT TOTAL 등) 에서 마지막 1~2 박스 미배치 잔존 문제를
+    // 사전 footprint 컬럼 묶음으로 해결. 기본 활성, options.footprintCluster.enabled=false 로 비활성.
+    //
+    // 동일 부킹 내 동일 footprint (±5cm) unit 들을 자체 column 적층 (heavierBelow 통과 +
+    // door 높이 ≤ doorHeight) → 그 column 위에 다른 부킹의 작은 footprint 박스 흡수
+    // (받침 ≥ 70%, 한 부킹 = 한 컨 보호).
+    //
+    // 활성 조건 (보수적): 컨테이너 ≥ 50 m³ + unit 풀 ≥ 5개. 1ST SG 같은 작은 시나리오 영향 X.
+    const fpClusterEnabled = options?.footprintCluster?.enabled !== false;
+    const placedByPreCluster = new Set<string>();
+    if (fpClusterEnabled && mode_placement === "wrapper") {
+      for (const cont of orderedContainers) {
+        // 이 컨테이너에 후보로 들어갈 수 있는 generalUnits 풀 산출
+        const pool = generalUnits.filter((u) => {
+          if (placedByPreCluster.has(u.unitId)) return false;
+          const cands = candidatesFor(u);
+          return cands.includes(cont);
+        });
+        if (pool.length === 0) continue;
+        const placedIds = preClusterFootprint(
+          cont,
+          pool,
+          options?.footprintCluster,
+        );
+        for (const id of placedIds) {
+          placedByPreCluster.add(id);
+          // booking anchor 갱신 — placement 직접 push 했으므로 컨테이너 결정 기록
+          const u = pool.find((x) => x.unitId === id);
+          if (u) recordBookingAnchor(u, cont);
+        }
+      }
+    }
     const placeQueue =
       mode_placement === "pure" ? placeQueuePure : placeQueueWrapper;
-    placeQueue(generalUnits);
-    placeQueue(topOnlyUnits);
+    placeQueue(generalUnits.filter((u) => !placedByPreCluster.has(u.unitId)));
+    placeQueue(topOnlyUnits.filter((u) => !placedByPreCluster.has(u.unitId)));
   }
 
   // 5.5) Stage 4 자리 바꾸기 패스 — 미배치 발생 시만 발동
@@ -2034,7 +2084,10 @@ export function packBest(
   const tryAllStrategies = (input: CargoSpec[]): CLPResult => {
     let best: CLPResult | null = null;
     let bestKey: EvalKey | null = null;
-    for (const strat of strategies) {
+    // 조기 종료 — 어느 시도든 미배치 0 도달하면 매트릭스 잔여 시나리오 전부 스킵.
+    // 여전히 best 가 더 좋아질 여지(균형/충전률)가 있으나, 사용자 1순위인 미배치 0 만족 시
+    // 추가 시도의 비용 > 이득이므로 즉시 break (시간 예산 보호 — 8분 환경 한계).
+    outer: for (const strat of strategies) {
       for (const co of containerOrders) {
         for (const consolidate of consolidateModes) {
           for (const pm of placementModes) {
@@ -2050,6 +2103,7 @@ export function packBest(
               bestKey = key;
               best = r;
             }
+            if (bestKey !== null && bestKey.unplacedCount === 0) break outer;
           }
         }
       }
@@ -2102,6 +2156,8 @@ export function packBest(
       }
     }
     if (!improved) break;
+    // 조기 종료 — 미배치 0 도달이면 백트래킹 루프 즉시 종료
+    if (current.unplaced.length === 0) break;
   }
 
   // 3단계: 동종(같은 spec) 컨 간 balance-swap — 미배치 0 + 동종 컨 2+ 인 경우만 시도.
