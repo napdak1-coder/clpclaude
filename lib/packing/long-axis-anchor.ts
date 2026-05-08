@@ -64,12 +64,40 @@ function maxSideOf(units: UnitItem[]): number {
 }
 
 /**
+ * 화물의 막대형(slender) 비율 — 모든 unit 의 min/max 중 최대값.
+ * 0 에 가까울수록 가는 막대 (예: 311×15×15 → 15/311=0.048).
+ * 큐브형(예: 114×114×71 → 71/114=0.62) 은 큰 값 → 막대형 아님.
+ */
+function maxSlendernessRatioOf(units: UnitItem[]): number {
+  let worst = 0;
+  for (const u of units) {
+    const lo = Math.min(u.width, u.length, u.height);
+    const hi = Math.max(u.width, u.length, u.height);
+    if (hi <= 0) continue;
+    const r = lo / hi;
+    if (r > worst) worst = r;
+  }
+  return worst;
+}
+
+/** 막대형(slenderness) 비율 임계 — min/max ≤ 0.25 인 경우만 진짜 막대형 (예: 311×15×15=0.048) */
+const SLENDERNESS_THRESHOLD = 0.25;
+
+/**
  * 장축 anchor 후보 화물 골라내기 — 최대 변 ≥ threshold 인 cargoId 그룹 반환.
  * cargoId 단위 그룹화 + longest-side desc 정렬 (가장 긴 화물부터 anchor).
+ *
+ * 활성 조건 강화 (옵션 A, 2026-05-08):
+ *   - 최대 변 ≥ threshold (기본 300cm) **AND**
+ *   - (innerLength 주어지면) 최대 변 ≥ 0.25 × innerLength **AND**
+ *   - 막대 형상 비율 (min/max) ≤ 0.25 — 진짜 가는 막대형만 (큐브형 제외, 회귀 방지)
+ *     예: 311×15×15 = 0.048 (통과), 114×114×71 VPHI = 0.62 (탈락)
+ *   목적: default ON 회귀 방지 — 큐브형 박스가 막대형 anchor 룰에 잘못 끼는 것 차단.
  */
 export function findLongAxisCargoes(
   units: UnitItem[],
   threshold = DEFAULT_THRESHOLD_CM,
+  innerLength?: number,
 ): Map<string, UnitItem[]> {
   const byCargo = new Map<string, UnitItem[]>();
   for (const u of units) {
@@ -80,11 +108,16 @@ export function findLongAxisCargoes(
   const result = new Map<string, UnitItem[]>();
   // longest side desc 로 정렬한 entries
   const entries: { cargoId: string; units: UnitItem[]; maxSide: number }[] = [];
+  // 강화 조건: 컨 길이의 25% 이상 막대형 (innerLength 가 있으면)
+  const longRatioThreshold = innerLength != null ? innerLength * 0.25 : 0;
   for (const [cid, list] of byCargo) {
     const ms = maxSideOf(list);
-    if (ms >= threshold) {
-      entries.push({ cargoId: cid, units: list, maxSide: ms });
-    }
+    if (ms < threshold) continue;
+    if (innerLength != null && ms < longRatioThreshold) continue;
+    // 막대 형상 비율 (min/max) ≤ 0.25 인 진짜 가는 막대형만
+    const slenderness = maxSlendernessRatioOf(list);
+    if (slenderness > SLENDERNESS_THRESHOLD) continue;
+    entries.push({ cargoId: cid, units: list, maxSide: ms });
   }
   entries.sort((a, b) => b.maxSide - a.maxSide);
   for (const e of entries) result.set(e.cargoId, e.units);
@@ -287,7 +320,12 @@ export function anchorLongAxisCargoes(
   if (options?.enabled === false) return placedIds;
 
   const threshold = options?.threshold ?? DEFAULT_THRESHOLD_CM;
-  const longCargoes = findLongAxisCargoes(unitPool, threshold);
+  // 활성 조건 강화: 컨 길이의 70% 이상 막대형만 선별 (회귀 방지)
+  const longCargoes = findLongAxisCargoes(
+    unitPool,
+    threshold,
+    container.spec.innerLength,
+  );
   if (longCargoes.size === 0) return placedIds;
 
   for (const [cargoId, units] of longCargoes) {

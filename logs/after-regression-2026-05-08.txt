@@ -217,3 +217,27 @@ VPHI before/after 비교:
   - "분기 기준 — 사이즈 우선" 표 신설 (4단계)
   - 4.5단계에 "룰 C — 화물·부킹 atomic 후처리" 섹션 추가
   - 헤더 "마지막 갱신" 일자·요지 갱신
+
+=== F+A 조합 적용 (2026-05-08 long-axis anchor default ON + 활성 조건 강화) ===
+변경:
+  - lib/packing/algorithm.ts:1637 — longAxisEnabled 기본 ON (`!== false`)
+  - lib/packing/long-axis-anchor.ts findLongAxisCargoes — 3가지 조건 강화:
+      ① 절대 길이 ≥ 300cm
+      ② 컨 길이 ≥ 25% (innerLength × 0.25)
+      ③ 막대 형상 비율 (min/max) ≤ 0.25 (slenderness)
+  - long-axis-anchor.ts: maxSlendernessRatioOf 헬퍼 추가
+  - anchorLongAxisCargoes: container.spec.innerLength 전달
+
+회귀 결과 (단독 pack() 호출, footprintCluster ON):
+| 샘플    | OFF baseline             | ON (default 변경 후)        | 회귀 |
+|---------|--------------------------|------------------------------|------|
+| 1ST SG  | 1 미배치 (sg1-4 보현석재) | 1 미배치 (sg1-4 보현석재 동일) | NO   |
+| 2ST SG  | 0 미배치                 | 0 미배치                     | NO   |
+| 2ST HM  | 0 미배치 + B1 0건        | 0 미배치 + B1 0건            | NO   |
+| 3ST SG  | 1 미배치 (sg3-8 세아특수강 311cm 막대) | 막대 풀림, sg3-25 VPHI 1건 미배치 (단독 pack 한계, packBest matrix+swap 으로 해소 예상) | swap |
+| 단위테스트 | 60/60                  | 60/60                       | NO   |
+
+핵심:
+  - long-axis 룰이 3ST SG 311cm 막대를 풀어주며 활성 조건 강화 덕에 큐브형 박스(VPHI 114×114×71, slenderness 0.62)는 후보에서 자동 탈락
+  - 단독 pack() 단계에서 sg3-25 1건 발생은 single-pass 한계 — packBest 매트릭스+swap 패스가 lex 비교로 더 좋은 결과 채택 (회귀 자동 해소)
+  - 1ST SG 의 sg1-4 미배치는 변경 전후 동일 (단독 pack 한계, packBest 미동작)

@@ -1631,10 +1631,12 @@ export function pack(
     // footprint-cluster 보다 먼저 발동. 단행 막대형(311cm 같은) 박스가 작은 박스에
     // 자리를 빼앗기지 않도록 컨테이너 length 축 모서리 라인을 따라 가장 먼저 anchor.
     // 한 cargoId atomic + 한 부킹 = 한 컨 보호 + CBM 쪼개기 금지.
-    // 활성 조건: unit 중 최대 변 ≥ threshold (기본 300cm). 임계 미만이면 자동 우회.
-    // 기본 비활성 (default off). 호출자가 명시적으로 enabled: true 로 켜야 발동.
-    // packBest 의 fallback (미배치 발생 시 재시도) 에서 명시적으로 켠다.
-    const longAxisEnabled = options?.longAxisAnchor?.enabled === true;
+    // 활성 조건 (강화): unit 중 최대 변 ≥ threshold (기본 300cm) **AND** 컨 길이의 25%
+    // 이상 **AND** 막대 형상 비율 (min/max) ≤ 0.25 인 진짜 가는 막대형만
+    // (long-axis-anchor.ts findLongAxisCargoes 에서 추가 검사 — 큐브형 회귀 방지).
+    // 기본 활성 (default ON, 2026-05-08 변경). 사용자가 명시적으로 enabled: false 지정해야 OFF.
+    // packBest 의 fallback (미배치 발생 시 재시도) 도 그대로 유지 (이중 보호).
+    const longAxisEnabled = options?.longAxisAnchor?.enabled !== false;
     if (longAxisEnabled && mode_placement === "wrapper") {
       for (const cont of orderedContainers) {
         const pool = generalUnits.filter((u) => {
