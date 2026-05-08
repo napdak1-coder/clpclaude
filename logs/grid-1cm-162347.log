@@ -1,0 +1,35 @@
+=== verify-hm-total ===
+컨테이너 2대, unplaced 0
+mismatch 0/34 (40FT 누락 0, 20FT 누락 0)
+force 결과: 컨테이너 2대, unplaced 0
+booking split 0/29
+=== 종합 ===
+AUTO 분배 일치 : ✅ (mismatch 0)
+전체           : ✅ PASS
+  (시간: 2s)
+=== verify-2st-hm-physics ===
+=== 2ST HM TOTAL — 물리·규칙 종합 검증 ===
+    ✓ B2. 부킹 인접 (bookingNo 분산 0)
+    ✓ B3. 미배치 0
+=== 종합: 33 pass / 0 fail ===
+  (시간: 360s)
+=== verify-2st-hm-practitioner ===
+    ✓ B3. 미배치 0
+=== 종합: 20 pass / 0 fail ===
+  (시간: 1s)
+=== verify-1st-sg-practitioner ===
+    ✓ B3. 미배치 0
+=== 종합: 14 pass / 0 fail ===
+  (시간: 8s)
+=== verify-2st-sg-total ===
+40FT set #1: ✅ 일치
+40FT set #2: ✅ 일치
+=== 종합 ===
+AUTO 분배 일치 : ✅
+전체 : ✅ PASS
+  (시간: 382s)
+=== verify-3st-sg-practitioner ===
+    ✗ B3. 미배치 0  1 units
+=== 종합: 13 pass / 1 fail ===
+  (시간: 42s)
+=== verify-3st-sg-total ===

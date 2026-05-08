@@ -1,0 +1,78 @@
+(node:831948) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/napda/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/clpclaude/lib/packing/extreme-point.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\Users\napda\OneDrive\바탕 화면\clpclaude\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+=== 3ST SG TOTAL 컨2 portfolio search ===
+목표: 0 미배치 layout 발견 (실무자가 실제 배치했음)
+portfolio: 4 FB × 6 SG × 10 sort × 50 seed = 12000 trials
+최대 시간: 1시간
+
+[1.8s][trial 1] FB-A/SG-A/tall-first/seed=0 미배치 4 ⭐ best
+[2.4s][trial 2] FB-A/SG-A/tall-first/seed=2654435761 미배치 2 ⭐ best
+[5.9s][trial 14] FB-A/SG-A/tall-first/seed=147926525 미배치 1 ⭐ best
+[60.1s][trial 159] 진행 중 — best 미배치 1
+[120.6s][trial 332] 진행 중 — best 미배치 1
+[181.3s][trial 494] 진행 중 — best 미배치 1
+[241.7s][trial 641] 진행 중 — best 미배치 1
+[301.9s][trial 799] 진행 중 — best 미배치 1
+[362.2s][trial 947] 진행 중 — best 미배치 1
+[422.7s][trial 1084] 진행 중 — best 미배치 1
+[482.7s][trial 1237] 진행 중 — best 미배치 1
+[543.4s][trial 1402] 진행 중 — best 미배치 1
+[603.4s][trial 1584] 진행 중 — best 미배치 1
+[664.1s][trial 1743] 진행 중 — best 미배치 1
+[724.2s][trial 1905] 진행 중 — best 미배치 1
+[784.4s][trial 2056] 진행 중 — best 미배치 1
+[844.6s][trial 2207] 진행 중 — best 미배치 1
+[904.7s][trial 2371] 진행 중 — best 미배치 1
+[964.8s][trial 2532] 진행 중 — best 미배치 1
+[1025.0s][trial 2688] 진행 중 — best 미배치 1
+[1085.0s][trial 2831] 진행 중 — best 미배치 1
+[1145.2s][trial 2986] 진행 중 — best 미배치 1
+[1205.4s][trial 3149] 진행 중 — best 미배치 1
+[1265.5s][trial 3297] 진행 중 — best 미배치 1
+[1326.0s][trial 3451] 진행 중 — best 미배치 1
+[1386.0s][trial 3617] 진행 중 — best 미배치 1
+[1446.1s][trial 3782] 진행 중 — best 미배치 1
+[1506.6s][trial 3943] 진행 중 — best 미배치 1
+[1566.7s][trial 4122] 진행 중 — best 미배치 1
+[1627.0s][trial 4297] 진행 중 — best 미배치 1
+[1687.1s][trial 4456] 진행 중 — best 미배치 1
+[1747.2s][trial 4645] 진행 중 — best 미배치 1
+[1807.5s][trial 4816] 진행 중 — best 미배치 1
+[1867.5s][trial 5017] 진행 중 — best 미배치 1
+[1927.6s][trial 5173] 진행 중 — best 미배치 1
+[1987.6s][trial 5324] 진행 중 — best 미배치 1
+[2048.0s][trial 5480] 진행 중 — best 미배치 1
+[2108.2s][trial 5645] 진행 중 — best 미배치 1
+[2168.3s][trial 5784] 진행 중 — best 미배치 1
+[2228.6s][trial 5941] 진행 중 — best 미배치 1
+[2288.7s][trial 6105] 진행 중 — best 미배치 1
+[2349.0s][trial 6254] 진행 중 — best 미배치 1
+[2409.7s][trial 6404] 진행 중 — best 미배치 1
+[2469.9s][trial 6560] 진행 중 — best 미배치 1
+[2530.2s][trial 6709] 진행 중 — best 미배치 1
+[2590.8s][trial 6851] 진행 중 — best 미배치 1
+[2651.0s][trial 6983] 진행 중 — best 미배치 1
+[2711.1s][trial 7120] 진행 중 — best 미배치 1
+[2771.2s][trial 7242] 진행 중 — best 미배치 1
+[2831.3s][trial 7380] 진행 중 — best 미배치 1
+[2891.6s][trial 7529] 진행 중 — best 미배치 1
+[2951.7s][trial 7681] 진행 중 — best 미배치 1
+[3012.7s][trial 7825] 진행 중 — best 미배치 1
+[3072.9s][trial 7978] 진행 중 — best 미배치 1
+[3133.3s][trial 8105] 진행 중 — best 미배치 1
+[3193.5s][trial 8222] 진행 중 — best 미배치 1
+[3253.8s][trial 8346] 진행 중 — best 미배치 1
+[3314.2s][trial 8495] 진행 중 — best 미배치 1
+[3374.6s][trial 8627] 진행 중 — best 미배치 1
+[3434.9s][trial 8754] 진행 중 — best 미배치 1
+[3495.0s][trial 8885] 진행 중 — best 미배치 1
+[3555.0s][trial 9033] 진행 중 — best 미배치 1
+
+=== 종합 ===
+총 trial: 9137
+런타임: 3600.2s
+Best 미배치: 1
+체크포인트: C:\Users\napda\OneDrive\바탕 화면\clpclaude\logs\search-3st-sg-best.json
+        C:\Users\napda\OneDrive\바탕 화면\clpclaude\logs\search-3st-sg-best.txt

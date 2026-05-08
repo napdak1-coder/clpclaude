@@ -573,7 +573,7 @@ export function tryPlaceUnitBruteForce(
   const legacyScoreFn = options?.scoreFn;
 
   // 5cm grid — fallback 만 호출되므로 비용은 낮지만 정밀도와 trade-off.
-  const STEP = 5;
+  const STEP = 2;
 
   // z 레벨 = 0 + 모든 placement 의 top z (중복 제거)
   const zLevelSet = new Set<number>([0]);

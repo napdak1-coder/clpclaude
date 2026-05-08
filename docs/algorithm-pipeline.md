@@ -1,7 +1,7 @@
 # clpclaude 분배 알고리즘 파이프라인
 
 > **자동 갱신 룰**: `lib/packing/algorithm.ts` 수정 시 이 파일도 함께 보강할 것 (rule: `keep-algorithm-pipeline-updated`).
-> 마지막 갱신: 2026-05-06 (atomic 완화 + tall-first 정렬 + rescue repack — fixedAssignment 강제 모드에서 unit-LDF interleave 적용, 1ST SG 39/39 fit 달성)
+> 마지막 갱신: 2026-05-07 (Stage 6 행 기반 잔여공간 fitting 추가 — lib/packing/row-residual.ts 신규, 회귀 0)
 
 ---
 
@@ -76,6 +76,34 @@
 - 다 들어가면 commit, 하나라도 실패하면 스냅샷 복원
 - 다중 라운드 (최대 5회) — cascading 배치 시도
 - 점수 합산 X — 단순 lex (성공 했나? 미배치 줄었나?)
+
+## 5.6단계: 자리 바꾸기 후 rescue repack (`Rescue repack`)
+
+**파일**: `lib/packing/algorithm.ts` (5.6 rescue repack 블록)
+
+**발동 조건**: `unplaced.length > 0` (미배치 발생 시만)
+
+- 미배치 cargo 가 fixedMap 으로 지정된 컨테이너에 이미 배치된 모든 unit 꺼내기
+- 미배치 unit 포함하여 tall-first + LDF 순으로 재배치 시도
+- 모두 들어가면 commit, 하나라도 실패하면 스냅샷 복원
+- 점수 합산 X — 미배치 줄었을 때만 commit
+
+## 5.7단계: 행 기반 잔여공간 fitting (Stage 6)
+
+**파일**: `lib/packing/row-residual.ts`, `lib/packing/algorithm.ts` (5.7 Stage 6 블록)
+
+**발동 조건**: `unplaced.length > 0` (rescue repack 후에도 미배치 남을 때만)
+
+원리:
+1. 컨테이너 현재 배치물을 Y 축 경계로 클러스터링 → "행(row)" 목록 추출
+2. 각 행의 잔여공간 계산: 바닥 우측 빈 폭(`floorFreeWidth`), 천장 여유(`ceilClearance`)
+3. 미배치 unit 을 cargoId 사전식 정렬 후, 각 행 잔여공간에 6면 회전 fitting 시도
+4. 기존 `tryPlaceUnit` / `tryPlaceUnitBruteForce` 재사용 (받침면·충돌·다단금지 검사 자동)
+
+**cargoId 원자성 보장**:
+- 같은 cargoId 의 모든 unit 이 한 컨에 모두 들어갈 때만 commit
+- 하나라도 실패 → 스냅샷 전체 복원, 다음 컨 시도
+- 어느 컨도 실패 → 미배치 그대로 유지
 
 ## 5단계: 다중 strategy 비교 (`packBest`)
 

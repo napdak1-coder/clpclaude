@@ -1,0 +1,39 @@
+=== verify-hm-total ===
+컨테이너 2대, unplaced 0
+mismatch 0/34 (40FT 누락 0, 20FT 누락 0)
+force 결과: 컨테이너 2대, unplaced 0
+booking split 0/29
+=== 종합 ===
+AUTO 분배 일치 : ✅ (mismatch 0)
+전체           : ✅ PASS
+=== verify-2st-hm-physics ===
+=== 2ST HM TOTAL — 물리·규칙 종합 검증 ===
+    ✓ A2. weight 합 ≤ 한도  17674.1/25000 kg (70.7%)
+    ✓ A2. weight 합 ≤ 한도  13474.8/25000 kg (53.9%)
+    ✓ A2. weight 합 ≤ 한도  6573.0/21000 kg (31.3%)
+    ✓ B2. 부킹 인접 (bookingNo 분산 0)
+    ✓ B3. 미배치 0
+=== 종합: 33 pass / 0 fail ===
+=== verify-2st-hm-practitioner ===
+    ✓ A2. weight 합 ≤ 한도  15852.8/25000 kg (63.4%)
+    ✓ A2. weight 합 ≤ 한도  17740.3/25000 kg (71.0%)
+    ✓ A2. weight 합 ≤ 한도  4128.8/21000 kg (19.7%)
+    ✓ B3. 미배치 0
+=== 종합: 20 pass / 0 fail ===
+=== verify-1st-sg-practitioner ===
+    ✓ A2. weight 합 ≤ 한도  19690.9/25000 kg (78.8%)
+    ✓ A2. weight 합 ≤ 한도  5981.0/21000 kg (28.5%)
+    ✓ B3. 미배치 0
+=== 종합: 14 pass / 0 fail ===
+=== verify-2st-sg-total ===
+40FT set #1: ✅ 일치
+40FT set #2: ✅ 일치
+=== 종합 ===
+AUTO 분배 일치 : ✅
+전체 : ✅ PASS
+=== verify-3st-sg-practitioner ===
+    ✓ A2. weight 합 ≤ 한도  18616.3/25000 kg (74.5%)
+    ✓ A2. weight 합 ≤ 한도  11853.0/25000 kg (47.4%)
+    ✗ B3. 미배치 0  1 units
+=== 종합: 13 pass / 1 fail ===
+=== verify-3st-sg-total ===

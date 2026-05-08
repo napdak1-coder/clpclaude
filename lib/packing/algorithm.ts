@@ -45,6 +45,11 @@ import {
 } from "./extreme-point.ts";
 import { allowedFaces, effectiveSizeFace } from "./constraints.ts";
 import { computeDisplayRows } from "./display-rows.ts";
+import {
+  computeContainerRows,
+  computeRowResiduals,
+  tryFitInRowResiduals,
+} from "./row-residual.ts";
 
 interface UnitItem {
   unitId: string;
@@ -1084,6 +1089,12 @@ export function pack(
 
   const unplaced: UnitItem[] = [];
 
+  // **부킹 인접 룰 (visual 트랙)** — 같은 bookingNo 의 cargo 가 한 컨에 처음 안착하면
+  // 그 컨을 anchor 로 기록. 같은 booking 의 후속 cargo 는 anchor 컨 만 후보로 강제.
+  // 효과: AUTO 모드에서 booking 분리 (같은 House B/L 다른 컨테이너) 방지.
+  // fixedMap (사용자 명시) 는 더 우선. anchor 컨에 안 들어가면 cargo 전체 unplaced (split 금지).
+  const bookingAnchor = new Map<string, ContainerState>();
+
   // 사용자 강제 분배 매핑 — 매핑된 cargoId 는 해당 컨테이너만 후보로 한정
   const fixedMap = options?.fixedAssignment ?? {};
   // 컨테이너 후보 정렬: options.containerOrder 따라 (기본 = original 순서)
@@ -1148,6 +1159,14 @@ export function pack(
       const target = visualContainers.find((c) => c.index === idx);
       return target ? [target] : [];
     }
+    // booking anchor — 같은 booking 이 이전에 어느 컨에 안착했으면 그 컨만 후보
+    // (fixedMap 보다는 후순위, autoDesignatedIdx 보다는 우선)
+    if (u.bookingNo) {
+      const anchorCont = bookingAnchor.get(u.bookingNo);
+      if (anchorCont && visualContainers.includes(anchorCont)) {
+        return [anchorCont];
+      }
+    }
     if (autoDesignatedIdx != null) {
       const designated = visualContainers.find(
         (c) => c.index === autoDesignatedIdx,
@@ -1184,6 +1203,15 @@ export function pack(
     state.candidates = snap.candidates;
     state.totalWeight = snap.totalWeight;
     state.visualCbm = snap.visualCbm;
+  };
+
+  // booking anchor 갱신 — cargo 가 컨테이너에 atomic 통째로 들어간 직후 호출.
+  // 같은 booking 의 첫 cargo 만 anchor 로 등록 (이미 있으면 무시). 후속 같은 booking
+  // cargo 는 candidatesFor 에서 anchor 컨만 후보로 받음.
+  const recordBookingAnchor = (u: UnitItem, cont: ContainerState): void => {
+    if (u.bookingNo && !bookingAnchor.has(u.bookingNo)) {
+      bookingAnchor.set(u.bookingNo, cont);
+    }
   };
 
   // **묶음 완화 룰 (column stack 우선화)**:
@@ -1225,6 +1253,7 @@ export function pack(
       //   직접 배치, 실패 unit 만 unplaced 처리 (partial OK).
       if (candidates.length === 1) {
         const c = candidates[0];
+        recordBookingAnchor(units[0], c); // booking anchor 갱신
         let anchor: { x: number; y: number; z: number } | undefined;
         for (const u of units) {
           const ok = tryPlaceUnitWithProximity(u, c.packState, c.spec, anchor) ||
@@ -1267,6 +1296,7 @@ export function pack(
         }
         if (allOk) {
           placedAll = true;
+          recordBookingAnchor(units[0], c); // booking anchor 갱신
           break;
         }
         restoreState(c.packState, snap);
@@ -1392,6 +1422,7 @@ export function pack(
         const ok = tryPlaceUnit(u, cand.packState, cand.spec) ||
                    tryPlaceUnitBruteForce(u, cand.packState, cand.spec);
         if (!ok) unplaced.push(u);
+        else recordBookingAnchor(u, cand); // booking anchor 갱신
       }
     }
     // 나머지 cargo 는 기존 atomic 루프로 처리
@@ -1404,6 +1435,7 @@ export function pack(
       // **atomic 완화** — 단일 candidate 케이스는 위에서 처리됨. 여기 안 올 것.
       if (candidates.length === 1) {
         const cand = candidates[0];
+        recordBookingAnchor(cg.firstUnit, cand); // booking anchor 갱신
         const candList = [cand];
         // bundle stack — 같은 cargoId 의 column stack 우선
         const fbUnits: UnitItem[] = [];
@@ -1510,6 +1542,7 @@ export function pack(
 
         if (allOk) {
           placedAll = true;
+          recordBookingAnchor(cg.firstUnit, cand); // booking anchor 갱신
           break;
         }
         restoreState(cand.packState, snap);
@@ -1661,6 +1694,67 @@ export function pack(
         for (const u of units) unplaced.push(u);
       }
     }
+  }
+
+  // 5.7) **Stage 6 — 행 기반 잔여공간 fitting**
+  //   rescue repack 후에도 미배치가 남으면, 컨테이너 현재 placements 를 Y 축으로
+  //   클러스터링하여 행을 추출하고 각 행의 잔여공간에 미배치 unit 을 fitting 시도.
+  //   - cargoId 원자성: 같은 cargoId 의 모든 unit 이 한 컨에 모두 들어갈 때만 commit
+  //   - 실패 시 structuredClone 스냅샷으로 전체 롤백 (흔적 없음)
+  //   - 발동 조건: unplaced.length > 0 (기존 0 미배치 샘플 영향 X)
+  if (unplaced.length > 0) {
+    // cargoId 별로 묶음 (cargoId·boxIndex 사전식 정렬)
+    const stage6ByCargo = new Map<string, UnitItem[]>();
+    for (const u of unplaced) {
+      const list = stage6ByCargo.get(u.cargoId) ?? [];
+      list.push(u);
+      stage6ByCargo.set(u.cargoId, list);
+    }
+    // cargoId 사전식 정렬
+    const stage6CargoIds = [...stage6ByCargo.keys()].sort();
+    const stage6StillUnplaced: UnitItem[] = [];
+
+    for (const cargoId of stage6CargoIds) {
+      const units = stage6ByCargo.get(cargoId)!;
+      // unitId 사전식 정렬 (결정성 보장)
+      units.sort((a, b) => a.unitId.localeCompare(b.unitId));
+
+      let placed = false;
+      for (const cont of containers) {
+        // 스냅샷 저장
+        const snap = structuredClone(cont.packState);
+        // 행 잔여공간 계산
+        const rows = computeContainerRows(cont.packState);
+        const residuals = computeRowResiduals(rows, cont.spec);
+
+        // 이 cargoId 의 모든 unit 을 행 잔여공간에 fitting 시도
+        let allOk = true;
+        for (const u of units) {
+          const ok = tryFitInRowResiduals(u, residuals, cont.packState, cont.spec);
+          if (!ok) {
+            allOk = false;
+            break;
+          }
+        }
+
+        if (allOk) {
+          // 모두 성공 → commit (state 이미 mutate 됨)
+          placed = true;
+          break;
+        } else {
+          // 하나라도 실패 → 스냅샷 복원
+          cont.packState = snap;
+        }
+      }
+
+      if (!placed) {
+        for (const u of units) stage6StillUnplaced.push(u);
+      }
+    }
+
+    // unplaced 갱신
+    unplaced.length = 0;
+    for (const u of stage6StillUnplaced) unplaced.push(u);
   }
 
   // 6) CT 화물 CBM → 컨테이너별 남은 여유 CBM 에 합산 (cargo 단위 분할 추적)

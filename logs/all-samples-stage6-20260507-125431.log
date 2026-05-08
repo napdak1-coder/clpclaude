@@ -1,0 +1,383 @@
+=== Stage 6 적용 후 5개 샘플 전체 검증 ===
+실행 시각: Thu May  7 12:54:32     2026
+변경 파일: lib/packing/row-residual.ts (신규), lib/packing/algorithm.ts (Stage 6 호출), docs/algorithm-pipeline.md
+
+
+==================== verify-hm-total ====================
+시작: 12:54:32
+엑셀 파싱: 34 행
+CargoSpec 생성: 34 화물
+
+실화주 목록:
+  1. 레오캡                       qty=318 cbm=15.74 about=15.74 size=0×0×0 booking=FBSGN252334
+  2. AMS                       qty=40 cbm=6.242 about=6.242 size=0×0×0 booking=FBSGN252398
+  3. 신화인터텍                     qty=2 cbm=1.494 about=1.494 size=0×0×0 booking=FBSGN252400
+  4. 한영                        qty=1 cbm=0.517 about=0.517 size=0×0×0 booking=FBSGN252405
+  5. 제이앤제이디에프                  qty=6 cbm=0.721 about=0.721 size=0×0×0 booking=FBSGN252407
+  6. 알앤디                       qty=26 cbm=4.594 about=4.594 size=0×0×0 booking=FBSGN252408
+  7. 오디에스                      qty=4 cbm=0.225 about=0.225 size=0×0×0 booking=FBSGN252410
+  8. 오디에스                      qty=37 cbm=3.445 about=3.445 size=0×0×0 booking=FBSGN252410
+  9. 영진                        qty=13 cbm=2.143 about=2.143 size=0×0×0 booking=FBSGN252416
+  10. 알앤디                       qty=36 cbm=5.921 about=5.921 size=0×0×0 booking=FBSGN252418
+  11. 더죤테크                      qty=1 cbm=1.315 about=1.315 size=0×0×0 booking=FBSGN252423
+  12. 더죤테크                      qty=1 cbm=0.69 about=0.69 size=0×0×0 booking=FBSGN252423
+  13. 더죤테크                      qty=1 cbm=0.555 about=0.555 size=0×0×0 booking=FBSGN252423
+  14. 성진산업                      qty=2 cbm=2.436 about=2.436 size=0×0×0 booking=FBSGN252424
+  15. 아로마라인                     qty=8 cbm=0.351 about=0.351 size=0×0×0 booking=FBSGN252426
+  16. 캐스텍코리아                    qty=1 cbm=0.732 about=0.732 size=0×0×0 booking=FBSGN252427
+  17. 반도글로벌                     qty=35 cbm=1.514 about=1.514 size=0×0×0 booking=FBSGN252428
+  18. 세광섬유                      qty=1 cbm=1.188 about=1.188 size=0×0×0 booking=FBSGN252429
+  19. 서진테크                      qty=32 cbm=0.528 about=0.528 size=0×0×0 booking=FBSGN252430
+  20. 리더스                       qty=1 cbm=0.506 about=0.506 size=0×0×0 booking=FBSGN252431
+  21. 미래나노텍                     qty=1 cbm=1.672 about=1.672 size=0×0×0 booking=FBSGN252425
+  22. 미래나노텍                     qty=2 cbm=7.698 about=7.698 size=0×0×0 booking=FBSGN252425
+  23. 녹원                        qty=1 cbm=0.393 about=0.393 size=0×0×0 booking=FBSGN252436
+  24. 지브이                       qty=20 cbm=0.698 about=0.698 size=0×0×0 booking=FBSGN252441
+  25. ACE COMPANY               qty=4 cbm=2.763 about=2.763 size=0×0×0 booking=FBSGN252344
+  26. 로얄티엔엘                     qty=7 cbm=7.827 about=7.827 size=0×0×0 booking=FBSGN252385
+  27. 로얄티엔엘                     qty=1 cbm=0.372 about=0.372 size=0×0×0 booking=FBSGN252385
+  28. 프런티어                      qty=41 cbm=4.23 about=4.23 size=0×0×0 booking=FBSGN252396
+  29. 한일베어링                     qty=1 cbm=0.525 about=0.525 size=0×0×0 booking=FBSGN252402
+  30. 한일베어링                     qty=1 cbm=0.28 about=0.28 size=0×0×0 booking=FBSGN252403
+  31. 한일베어링                     qty=1 cbm=0.736 about=0.736 size=0×0×0 booking=FBSGN252404
+  32. 세양폴리머(SAMSUNG CNT)        qty=1 cbm=0.375 about=0.375 size=0×0×0 booking=FBSGN252409
+  33. 다이나믹 디자인                  qty=4 cbm=2.996 about=2.996 size=0×0×0 booking=FBSGN252433
+  34. 진양오일씰                     qty=2 cbm=4.319 about=4.319 size=0×0×0 booking=FBSGN252435
+
+=== AUTO 모드 packBest ===
+pack 시간: 20ms
+컨테이너 2대, unplaced 0
+
+--- AUTO 결과: 실화주 → 컨테이너 ---
+40FT (24): 레오캡, AMS, 신화인터텍, 한영, 제이앤제이디에프, 알앤디, 오디에스, 오디에스, 영진, 알앤디, 더죤테크, 더죤테크, 더죤테크, 성진산업, 아로마라인, 캐스텍코리아, 반도글로벌, 세광섬유, 서진테크, 리더스, 미래나노텍, 미래나노텍, 녹원, 지브이
+20FT (10): ACE COMPANY, 로얄티엔엘, 로얄티엔엘, 프런티어, 한일베어링, 한일베어링, 한일베어링, 세양폴리머(SAMSUNG CNT), 다이나믹 디자인, 진양오일씰
+
+=== AUTO vs EXPECTED diff ===
+
+mismatch 0/34 (40FT 누락 0, 20FT 누락 0)
+
+=== FORCE 모드 — 실무자 분배 강제 ===
+force 결과: 컨테이너 2대, unplaced 0
+
+--- 물리·한도 검증 (FORCE) ---
+[40FT] placed=0, fill 102.2%, weight 0/25000, bb ✓, weight ✓
+[20FT] placed=0, fill 87.2%, weight 0/21000, bb ✓, weight ✓
+
+--- Booking 인접 (AUTO) ---
+booking split 0/29
+
+=== 종합 ===
+AUTO 분배 일치 : ✅ (mismatch 0)
+FORCE 물리·한도 : ✅
+Booking 인접   : ✅ (split 0)
+전체           : ✅ PASS
+종료: 12:54:33 (exit 0)
+
+==================== verify-2st-hm-physics ====================
+시작: 12:54:33
+
+=== 2ST HM TOTAL — 물리·규칙 종합 검증 ===
+컨테이너: 3대 (40FT + 40FT + 20FT)
+unplaced: 0
+
+────────────────────────────────────────
+[1] 40FT  (inner 234×1200×268 cm)
+  visual placements: 39, bulk items: 6
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  17674.1/25000 kg (70.7%)
+    ✓ A3. cbm 합 ≤ cap × 1.05 (SOFT_OVERFLOW)  54.33/75.25 m³ (72.2%)
+    ✓ A4. 충돌 0 (AABB pairwise)
+    ✓ A5. full support (z>0 화물 ≥ 70% 받침)
+    ✓ B4. noStacking 위반 0
+    ✓ B5. topOnly 위반 0
+    ✓ B6. heavierBelow 위반 0
+    ✓ B7. orientation 위반 0
+────────────────────────────────────────
+[2] 40FT  (inner 234×1200×268 cm)
+  visual placements: 24, bulk items: 0
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  13474.8/25000 kg (53.9%)
+    ✓ A3. cbm 합 ≤ cap × 1.05 (SOFT_OVERFLOW)  43.19/75.25 m³ (57.4%)
+    ✓ A4. 충돌 0 (AABB pairwise)
+    ✓ A5. full support (z>0 화물 ≥ 70% 받침)
+    ✓ B4. noStacking 위반 0
+    ✓ B5. topOnly 위반 0
+    ✓ B6. heavierBelow 위반 0
+    ✓ B7. orientation 위반 0
+────────────────────────────────────────
+[3] 20FT  (inner 234×590×238 cm)
+  visual placements: 17, bulk items: 0
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  6573.0/21000 kg (31.3%)
+    ✓ A3. cbm 합 ≤ cap × 1.05 (SOFT_OVERFLOW)  26.45/32.86 m³ (80.5%)
+    ✓ A4. 충돌 0 (AABB pairwise)
+    ✓ A5. full support (z>0 화물 ≥ 70% 받침)
+    ✓ B4. noStacking 위반 0
+    ✓ B5. topOnly 위반 0
+    ✓ B6. heavierBelow 위반 0
+    ✓ B7. orientation 위반 0
+
+────────────────────────────────────────
+[전역] 알고리즘 룰
+    ✓ B1. CBM 쪼개기 0 (cargoId 분산 X)
+    ✓ B2. 부킹 인접 (bookingNo 분산 0)
+    ✓ B3. 미배치 0
+
+=== 종합: 33 pass / 0 fail ===
+종료: 12:54:51 (exit 0)
+
+==================== verify-2st-hm-practitioner ====================
+시작: 12:54:51
+=== 2ST HM TOTAL — 실무자 분배 물리 검증 ===
+fixedContainers: 40FT, 40FT, 20FT
+fixedAssignment: 26 cargo → 컨1=13, 컨2=9, 컨3=4
+
+컨테이너: 3대 (40FT + 40FT + 20FT)
+unplaced (실무자 계획에서 안 들어간 unit): 0
+
+────────────────────────────────────────
+[1] 40FT  (inner 234×1200×268 cm)
+  실무자 배정 화주: AMS, 한국쎄미텍, 유라, KIOSKIN, 전영사, SD KOREA, SJIT, 일라, SJI, KFTS, 한성엔터프라이즈, 이구산업, 케이티엔테크놀러지
+  visual placements: 40, bulk items: 5
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  15852.8/25000 kg (63.4%)
+    ✓ A3. cbm 합 ≤ cap × 1.05 (SOFT_OVERFLOW)  57.19/75.25 m³ (76.0%)
+    ✓ A4. 충돌 0
+    ✓ A5. full support (≥70%)
+────────────────────────────────────────
+[2] 40FT  (inner 234×1200×268 cm)
+  실무자 배정 화주: 제임스텍, 중앙바이오텍, 리브유, 파인 파인비나, 블루오션, 파인비나, 장안어패럴, 디씨이메탈, 스톰테크
+  visual placements: 27, bulk items: 1
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  17740.3/25000 kg (71.0%)
+    ✓ A3. cbm 합 ≤ cap × 1.05 (SOFT_OVERFLOW)  52.60/75.25 m³ (69.9%)
+    ✓ A4. 충돌 0
+    ✓ A5. full support (≥70%)
+────────────────────────────────────────
+[3] 20FT  (inner 234×590×238 cm)
+  실무자 배정 화주: 효성, 로제화장품, 삼원절연, 화인써키트
+  visual placements: 13, bulk items: 0
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  4128.8/21000 kg (19.7%)
+    ✓ A3. cbm 합 ≤ cap × 1.05 (SOFT_OVERFLOW)  15.14/32.86 m³ (46.1%)
+    ✓ A4. 충돌 0
+    ✓ A5. full support (≥70%)
+
+────────────────────────────────────────
+[전역] 룰
+    ✓ B1. cargoId 분산 0
+    ✓ B3. 미배치 0
+
+=== 종합: 20 pass / 0 fail ===
+종료: 12:54:52 (exit 0)
+
+==================== verify-1st-sg-practitioner ====================
+시작: 12:54:52
+=== 1ST SG TOTAL — 실무자 분배 물리 검증 ===
+fixedContainers: 40FT, 20FT
+fixedAssignment: 22 cargo → 컨1=17 화주, 컨2=5 화주
+
+컨테이너: 2대 (40FT + 20FT)
+unplaced (실무자 계획에서 안 들어간 unit): 0
+
+────────────────────────────────────────
+[1] 40FT  (inner 234×1200×268 cm)
+  실무자 배정 화주: 메가젠임플란트, 데코론, YKMC, 보현석재, 에이제이테크, 카페봄봄, EXCELERATE ENERGY, VISCOSMO, 더블유티 스프레이, 리만, 대한정밀공업, 선진뷰티사이언스, SUNGBO INDUSTRIA, 제일기공, 웨스코, 디에스콘, 티케이테크
+  visual placements: 39, bulk items: 0
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  19690.9/25000 kg (78.8%)
+    ✓ A3. cbm 합 ≤ cap × 1.05  50.75/75.25 m³ (67.4%)
+    ✓ A4. 충돌 0
+    ✓ A5. full support (≥70%)
+────────────────────────────────────────
+[2] 20FT  (inner 234×590×238 cm)
+  실무자 배정 화주: AWOT, 대원산업, 씨에스에프, HD현대건설기계, 포컴퍼니
+  visual placements: 15, bulk items: 0
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  5981.0/21000 kg (28.5%)
+    ✓ A3. cbm 합 ≤ cap × 1.05  22.98/32.86 m³ (69.9%)
+    ✓ A4. 충돌 0
+    ✓ A5. full support (≥70%)
+
+────────────────────────────────────────
+[전역] 룰
+    ✓ B1. cargoId 분산 0
+    ✓ B3. 미배치 0
+
+=== 종합: 14 pass / 0 fail ===
+종료: 12:54:53 (exit 0)
+
+==================== verify-2st-sg-total ====================
+시작: 12:54:53
+JSON 샘플: 23 행
+CargoSpec 생성: 23 화물
+
+실화주 / 사이즈 / cbm:
+   1. 나라켐                    qty=  1 cbm=1.125 about=1.125 size=110×110×93
+   2. 지덕산업                   qty=  2 cbm=3.521 about=3.521 size=110×110×138
+   3. 트리온                    qty=  6 cbm=9.649 about=9.649 size=115×115×118
+   4. 세영교역                   qty=  1 cbm=1.601 about=1.601 size=131×101×121
+   5. 한국특수잉크                 qty=  2 cbm=- about=2.6 size=110×130×90
+   6. 삼영 SAMYUNG ENC         qty= 44 cbm=- about=5.078 size=0×0×0
+   7. 효림네트                   qty=  4 cbm=- about=13.045 size=112×130×224
+   8. 한국선재                   qty=  2 cbm=1.532 about=1.944 size=90×90×80
+   9. YKMC                   qty= 15 cbm=- about=5.71 size=84×81×56
+  10. YKMC                   qty= 10 cbm=- about=1.354 size=0×0×0
+  11. ECTA                   qty=  3 cbm=11.384 about=11.384 size=170×126×198
+  12. TO THE RAFFLES         qty=  1 cbm=- about=1.3 size=110×110×105
+  13. 오리스                    qty=  1 cbm=- about=0.451 size=108×58×72
+  14. 글로벌마린                  qty=  1 cbm=- about=1 size=110×110×75
+  15. 동양켐텍                   qty= 10 cbm=- about=13.31 size=110×110×110
+  16. 광명산업                   qty=  1 cbm=- about=0.786 size=110×110×65
+  17. 웨스코 일렉트로드              qty=  2 cbm=- about=1.393 size=81×172×45
+  18. HD                     qty= 20 cbm=1.125 about=1.125 size=0×0×0
+  19. 리만                     qty=  4 cbm=4.417 about=4.417 size=110×110×39
+  20. 한국기술                   qty=  1 cbm=- about=1.255 size=117×95×113
+  21. 현대에버다임                 qty=  2 cbm=- about=4.441 size=150×140×120
+  22. PTI                    qty=  1 cbm=- about=2.667 size=126×126×168
+  23. 세광하이테크                 qty=  1 cbm=- about=0.01 size=31×11×25
+
+=== AUTO 모드 packBest ===
+pack 시간: 20247ms
+컨테이너: 2대 — 40FT, 40FT
+unplaced: 0
+
+--- 컨테이너별 실화주 ---
+[1] 40FT (10 행): 나라켐, 지덕산업, 트리온, 세영교역, 삼영 SAMYUNG ENC, 한국선재, ECTA, HD, 리만, 현대에버다임
+[2] 40FT (13 행): 한국특수잉크, 효림네트, YKMC, YKMC, TO THE RAFFLES, 오리스, 글로벌마린, 동양켐텍, 광명산업, 웨스코 일렉트로드, 한국기술, PTI, 세광하이테크
+
+=== Expected vs Actual (set 비교) ===
+(컨테이너 라벨 swap 매핑)
+40FT set #1: ✅ 일치
+40FT set #2: ✅ 일치
+
+=== 종합 ===
+AUTO 분배 일치 : ✅
+컨테이너 = 2×40FT : ✅
+전체 : ✅ PASS
+종료: 12:55:13 (exit 0)
+
+==================== verify-3st-sg-practitioner ====================
+시작: 12:55:13
+=== 3ST SG TOTAL — 실무자 분배 물리 검증 ===
+fixedContainers: 40FT, 40FT
+fixedAssignment: 35 cargo → 컨1=19, 컨2=16
+
+컨테이너: 2대 (40FT + 40FT)
+unplaced: 1
+
+⚠ unplaced 상세:
+   - SK GEO CENTRIC (id=sg3-35, qty=1, size=135×115×129, cbm=5.344, weight=2625kg)
+
+────────────────────────────────────────
+[1] 40FT  (inner 234×1200×268 cm)
+  실무자 배정 화주: 나투라미디어 &, SMI &, 폰브, 디네오, 삼원코브라, 원신, 광성텍, 세아특수강, 현승아이앤씨, 롯데케미칼 **도착보고대행요청**, 성안기계, DSSB, 대동, 위너스마린, 카버코리아, 리틀스푼, SUNGSHINTECH, 에스앤비테크, 나라오토시스
+  visual placements: 32, bulk items: 6
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  18616.3/25000 kg (74.5%)
+    ✓ A3. cbm 합 ≤ cap × 1.05  46.79/75.25 m³ (62.2%)
+    ✓ A4. 충돌 0
+    ✓ A5. full support (≥70%)
+────────────────────────────────────────
+[2] 40FT  (inner 234×1200×268 cm)
+  실무자 배정 화주: 삼성전자, 삼성전자, VPHI, VPHI, VPHI, VPHI, ANC LOGISTICS, 한도신소재, 지케이씨  *반송*, 애쉬랜드, FLOWBUS, 삼성전자, 제일기공, 씨엔스타, KSB, SK GEO CENTRIC
+  visual placements: 25, bulk items: 0
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  11860.0/25000 kg (47.4%)
+    ✓ A3. cbm 합 ≤ cap × 1.05  41.40/75.25 m³ (55.0%)
+    ✓ A4. 충돌 0
+    ✓ A5. full support (≥70%)
+
+────────────────────────────────────────
+[전역] 룰
+    ✓ B1. cargoId 분산 0
+    ✗ B3. 미배치 0  1 units
+
+=== 종합: 13 pass / 1 fail ===
+종료: 12:55:17 (exit 0)
+
+==================== verify-3st-sg-total ====================
+시작: 12:55:17
+JSON 샘플: 35 행
+
+=== AUTO 모드 packBest ===
+pack 시간: 473708ms
+컨테이너: 2대 — 40FT, 40FT
+unplaced: 1
+
+--- 컨테이너별 실화주 (시스템 AUTO) ---
+[1] 40FT (21 행): 나투라미디어 &, 디네오, 삼원코브라, 광성텍, 현승아이앤씨, 롯데케미칼 **도착보고대행요청**, 성안기계, 위너스마린, 리틀스푼, SUNGSHINTECH, 에스앤비테크, 삼성전자, VPHI, VPHI, 한도신소재, 지케이씨  *반송*, 애쉬랜드, FLOWBUS, 삼성전자, 제일기공, KSB
+[2] 40FT (13 행): SMI &, 폰브, 원신, 세아특수강, DSSB, 대동, 카버코리아, 나라오토시스, 삼성전자, VPHI, VPHI, ANC LOGISTICS, 씨엔스타
+UNASSIGNED (1): SK GEO CENTRIC
+
+--- 컨테이너별 실화주 (실무자) ---
+[1] 40FT (19 행): 나투라미디어 &, SMI &, 폰브, 디네오, 삼원코브라, 원신, 광성텍, 세아특수강, 현승아이앤씨, 롯데케미칼 **도착보고대행요청**, 성안기계, DSSB, 대동, 위너스마린, 카버코리아, 리틀스푼, SUNGSHINTECH, 에스앤비테크, 나라오토시스
+[2] 40FT (16 행): 삼성전자, 삼성전자, VPHI, VPHI, VPHI, VPHI, ANC LOGISTICS, 한도신소재, 지케이씨  *반송*, 애쉬랜드, FLOWBUS, 삼성전자, 제일기공, 씨엔스타, KSB, SK GEO CENTRIC
+
+=== Expected vs Actual (set 비교) ===
+(컨테이너 라벨 swap 매핑)
+40FT set #1: ❌ 불일치
+  실무자엔 있는데 시스템 누락: 삼성전자×1, VPHI×2, ANC LOGISTICS×1, 씨엔스타×1, SK GEO CENTRIC×1
+  시스템엔 있는데 실무자 없음: 나투라미디어 &×1, 디네오×1, 삼원코브라×1, 광성텍×1, 현승아이앤씨×1, 롯데케미칼 **도착보고대행요청**×1, 성안기계×1, 위너스마린×1, 리틀스푼×1, SUNGSHINTECH×1, 에스앤비테크×1
+40FT set #2: ❌ 불일치
+  실무자엔 있는데 시스템 누락: 나투라미디어 &×1, 디네오×1, 삼원코브라×1, 광성텍×1, 현승아이앤씨×1, 롯데케미칼 **도착보고대행요청**×1, 성안기계×1, 위너스마린×1, 리틀스푼×1, SUNGSHINTECH×1, 에스앤비테크×1
+  시스템엔 있는데 실무자 없음: 삼성전자×1, VPHI×2, ANC LOGISTICS×1, 씨엔스타×1
+
+=== 종합 ===
+AUTO 분배 일치 : ❌ mismatch 31
+컨테이너 = 2×40FT : ✅
+전체 : ❌ FAIL
+종료: 13:03:11 (exit 0)
+
+==================== verify-3st-sg-physics ====================
+시작: 13:03:11
+
+=== 3ST SG TOTAL — 물리·규칙 종합 검증 ===
+컨테이너: 2대 (40FT + 40FT)
+unplaced: 1
+
+────────────────────────────────────────
+[1] 40FT  (inner 234×1200×268 cm)
+  visual placements: 23, bulk items: 6
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  14373.4/25000 kg (57.5%)
+    ✓ A3. cbm 합 ≤ cap × 1.05 (SOFT_OVERFLOW)  44.41/75.25 m³ (59.0%)
+    ✓ A4. 충돌 0 (AABB pairwise)
+    ✓ A5. full support (z>0 화물 ≥ 70% 받침)
+    ✓ B4. noStacking 위반 0
+    ✓ B5. topOnly 위반 0
+    ✓ B6. heavierBelow 위반 0
+    ✓ B7. orientation 위반 0
+────────────────────────────────────────
+[2] 40FT  (inner 234×1200×268 cm)
+  visual placements: 32, bulk items: 0
+    ✓ A1a. bounding width (≤ innerWidth)
+    ✓ A1b. bounding height (≤ innerHeight)
+    ✓ A2. weight 합 ≤ 한도  14352.9/25000 kg (57.4%)
+    ✓ A3. cbm 합 ≤ cap × 1.05 (SOFT_OVERFLOW)  39.78/75.25 m³ (52.9%)
+    ✓ A4. 충돌 0 (AABB pairwise)
+    ✓ A5. full support (z>0 화물 ≥ 70% 받침)
+    ✓ B4. noStacking 위반 0
+    ✓ B5. topOnly 위반 0
+    ✓ B6. heavierBelow 위반 0
+    ✓ B7. orientation 위반 0
+
+────────────────────────────────────────
+[전역] 알고리즘 룰
+    ✓ B1. CBM 쪼개기 0 (cargoId 분산 X)
+    ✗ B2. 부킹 인접 (bookingNo 분산 0)  FBSIN260400→[1,2], FBSIN260425→[1,2]
+    ✗ B3. 미배치 0  3 건
+
+=== 종합: 21 pass / 2 fail ===
+종료: 13:10:51 (exit 0)
