@@ -1,0 +1,1514 @@
+[
+  {
+    "index": 1,
+    "spec": {
+      "type": "40FT",
+      "maxWeightKg": 25000,
+      "maxCbm": 60,
+      "innerLength": 1200,
+      "innerWidth": 234,
+      "doorHeight": 258,
+      "innerHeight": 268
+    },
+    "totalWeight": 19509.999,
+    "placements": [
+      {
+        "cargoId": "sg3-8",
+        "unitId": "sg3-8-1",
+        "shipper": "세아특수강",
+        "bookingNo": "FBSIN260427",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "width": 42,
+          "length": 322,
+          "height": 41
+        },
+        "weight": 715.25,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-8",
+        "unitId": "sg3-8-2",
+        "shipper": "세아특수강",
+        "bookingNo": "FBSIN260427",
+        "position": {
+          "x": 42,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "width": 42,
+          "length": 322,
+          "height": 41
+        },
+        "weight": 715.25,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-8",
+        "unitId": "sg3-8-3",
+        "shipper": "세아특수강",
+        "bookingNo": "FBSIN260427",
+        "position": {
+          "x": 84,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "width": 42,
+          "length": 322,
+          "height": 41
+        },
+        "weight": 715.25,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-8",
+        "unitId": "sg3-8-4",
+        "shipper": "세아특수강",
+        "bookingNo": "FBSIN260427",
+        "position": {
+          "x": 126,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "width": 42,
+          "length": 322,
+          "height": 41
+        },
+        "weight": 715.25,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-8",
+        "unitId": "sg3-8-5",
+        "shipper": "세아특수강",
+        "bookingNo": "FBSIN260427",
+        "position": {
+          "x": 168,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "width": 42,
+          "length": 322,
+          "height": 41
+        },
+        "weight": 715.25,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-8",
+        "unitId": "sg3-8-6",
+        "shipper": "세아특수강",
+        "bookingNo": "FBSIN260427",
+        "position": {
+          "x": 0,
+          "y": 322,
+          "z": 0
+        },
+        "size": {
+          "width": 42,
+          "length": 322,
+          "height": 41
+        },
+        "weight": 715.25,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-8",
+        "unitId": "sg3-8-7",
+        "shipper": "세아특수강",
+        "bookingNo": "FBSIN260427",
+        "position": {
+          "x": 42,
+          "y": 322,
+          "z": 0
+        },
+        "size": {
+          "width": 42,
+          "length": 322,
+          "height": 41
+        },
+        "weight": 715.25,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-8",
+        "unitId": "sg3-8-0",
+        "shipper": "세아특수강",
+        "bookingNo": "FBSIN260427",
+        "position": {
+          "x": 84,
+          "y": 322,
+          "z": 0
+        },
+        "size": {
+          "width": 15,
+          "length": 311,
+          "height": 15
+        },
+        "weight": 715.25,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-13",
+        "unitId": "sg3-13-1",
+        "shipper": "대동",
+        "bookingNo": "FBSIN260446",
+        "position": {
+          "x": 0,
+          "y": 644,
+          "z": 0
+        },
+        "size": {
+          "width": 218,
+          "length": 114,
+          "height": 86
+        },
+        "weight": 349.333,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-13",
+        "unitId": "sg3-13-2",
+        "shipper": "대동",
+        "bookingNo": "FBSIN260446",
+        "position": {
+          "x": 0,
+          "y": 644,
+          "z": 86
+        },
+        "size": {
+          "width": 218,
+          "length": 114,
+          "height": 86
+        },
+        "weight": 349.333,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-13",
+        "unitId": "sg3-13-0",
+        "shipper": "대동",
+        "bookingNo": "FBSIN260446",
+        "position": {
+          "x": 0,
+          "y": 644,
+          "z": 172
+        },
+        "size": {
+          "width": 218,
+          "length": 114,
+          "height": 68
+        },
+        "weight": 349.333,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-20",
+        "unitId": "sg3-20-1",
+        "shipper": "삼성전자",
+        "bookingNo": "FBSIN260343",
+        "position": {
+          "x": 0,
+          "y": 758,
+          "z": 0
+        },
+        "size": {
+          "width": 114,
+          "length": 114,
+          "height": 112
+        },
+        "weight": 135,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-20",
+        "unitId": "sg3-20-0",
+        "shipper": "삼성전자",
+        "bookingNo": "FBSIN260343",
+        "position": {
+          "x": 0,
+          "y": 758,
+          "z": 112
+        },
+        "size": {
+          "width": 114,
+          "length": 114,
+          "height": 38
+        },
+        "weight": 135,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-12",
+        "unitId": "sg3-12-0",
+        "shipper": "DSSB",
+        "bookingNo": "FBSIN260444",
+        "position": {
+          "x": 0,
+          "y": 758,
+          "z": 150
+        },
+        "size": {
+          "width": 112,
+          "length": 112,
+          "height": 72
+        },
+        "weight": 106,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-34",
+        "unitId": "sg3-34-0",
+        "shipper": "KSB",
+        "bookingNo": "FBSIN260414",
+        "position": {
+          "x": 99,
+          "y": 322,
+          "z": 0
+        },
+        "size": {
+          "width": 101,
+          "length": 143,
+          "height": 195
+        },
+        "weight": 344,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-7",
+        "unitId": "sg3-7-1",
+        "shipper": "광성텍",
+        "bookingNo": "FBSIN260425",
+        "position": {
+          "x": 99,
+          "y": 465,
+          "z": 0
+        },
+        "size": {
+          "width": 110,
+          "length": 129,
+          "height": 195
+        },
+        "weight": 1920,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 4
+      },
+      {
+        "cargoId": "sg3-7",
+        "unitId": "sg3-7-0",
+        "shipper": "광성텍",
+        "bookingNo": "FBSIN260425",
+        "position": {
+          "x": 114,
+          "y": 758,
+          "z": 0
+        },
+        "size": {
+          "width": 115,
+          "length": 179,
+          "height": 126
+        },
+        "weight": 1920,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-6",
+        "unitId": "sg3-6-0",
+        "shipper": "원신",
+        "bookingNo": "FBSIN260425",
+        "position": {
+          "x": 114,
+          "y": 937,
+          "z": 0
+        },
+        "size": {
+          "width": 106,
+          "length": 64,
+          "height": 129
+        },
+        "weight": 550,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 4
+      },
+      {
+        "cargoId": "sg3-35",
+        "unitId": "sg3-35-0",
+        "shipper": "SK GEO CENTRIC",
+        "bookingNo": "FBSIN260431",
+        "position": {
+          "x": 0,
+          "y": 1001,
+          "z": 0
+        },
+        "size": {
+          "width": 135,
+          "length": 115,
+          "height": 129
+        },
+        "weight": 875,
+        "remarks": {
+          "noStacking": true,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-35",
+        "unitId": "sg3-35-1",
+        "shipper": "SK GEO CENTRIC",
+        "bookingNo": "FBSIN260431",
+        "position": {
+          "x": 114,
+          "y": 758,
+          "z": 126
+        },
+        "size": {
+          "width": 115,
+          "length": 135,
+          "height": 129
+        },
+        "weight": 875,
+        "remarks": {
+          "noStacking": true,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-35",
+        "unitId": "sg3-35-2",
+        "shipper": "SK GEO CENTRIC",
+        "bookingNo": "FBSIN260431",
+        "position": {
+          "x": 0,
+          "y": 872,
+          "z": 0
+        },
+        "size": {
+          "width": 85,
+          "length": 115,
+          "height": 137
+        },
+        "weight": 875,
+        "remarks": {
+          "noStacking": true,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 5
+      },
+      {
+        "cargoId": "sg3-2",
+        "unitId": "sg3-2-0",
+        "shipper": "SMI &",
+        "bookingNo": "FBSIN260368",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 41
+        },
+        "size": {
+          "width": 110,
+          "length": 106,
+          "height": 159
+        },
+        "weight": 423.5,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-2",
+        "unitId": "sg3-2-1",
+        "shipper": "SMI &",
+        "bookingNo": "FBSIN260368",
+        "position": {
+          "x": 0,
+          "y": 106,
+          "z": 41
+        },
+        "size": {
+          "width": 135,
+          "length": 109,
+          "height": 74
+        },
+        "weight": 423.5,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-31",
+        "unitId": "sg3-31-0",
+        "shipper": "삼성전자",
+        "bookingNo": "FBSIN260423",
+        "position": {
+          "x": 135,
+          "y": 1001,
+          "z": 0
+        },
+        "size": {
+          "width": 99,
+          "length": 113,
+          "height": 128
+        },
+        "weight": 455,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-32",
+        "unitId": "sg3-32-0",
+        "shipper": "제일기공",
+        "bookingNo": "FBSIN260426",
+        "position": {
+          "x": 0,
+          "y": 215,
+          "z": 41
+        },
+        "size": {
+          "width": 147,
+          "length": 107,
+          "height": 91
+        },
+        "weight": 629,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-22",
+        "unitId": "sg3-22-0",
+        "shipper": "VPHI",
+        "bookingNo": "FBSIN260400",
+        "position": {
+          "x": 0,
+          "y": 106,
+          "z": 115
+        },
+        "size": {
+          "width": 111,
+          "length": 104,
+          "height": 111
+        },
+        "weight": 375.5,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 2
+      },
+      {
+        "cargoId": "sg3-22",
+        "unitId": "sg3-22-1",
+        "shipper": "VPHI",
+        "bookingNo": "FBSIN260400",
+        "position": {
+          "x": 0,
+          "y": 215,
+          "z": 132
+        },
+        "size": {
+          "width": 111,
+          "length": 104,
+          "height": 111
+        },
+        "weight": 375.5,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 2
+      },
+      {
+        "cargoId": "sg3-23",
+        "unitId": "sg3-23-0",
+        "shipper": "VPHI",
+        "bookingNo": "FBSIN260400",
+        "position": {
+          "x": 0,
+          "y": 1116,
+          "z": 0
+        },
+        "size": {
+          "width": 114,
+          "length": 71,
+          "height": 114
+        },
+        "weight": 375.5,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 2
+      },
+      {
+        "cargoId": "sg3-23",
+        "unitId": "sg3-23-1",
+        "shipper": "VPHI",
+        "bookingNo": "FBSIN260400",
+        "position": {
+          "x": 0,
+          "y": 1116,
+          "z": 114
+        },
+        "size": {
+          "width": 114,
+          "length": 71,
+          "height": 114
+        },
+        "weight": 375.5,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 2
+      },
+      {
+        "cargoId": "sg3-25",
+        "unitId": "sg3-25-0",
+        "shipper": "VPHI",
+        "bookingNo": "FBSIN260400",
+        "position": {
+          "x": 114,
+          "y": 1116,
+          "z": 0
+        },
+        "size": {
+          "width": 114,
+          "length": 71,
+          "height": 114
+        },
+        "weight": 250,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 2
+      },
+      {
+        "cargoId": "sg3-25",
+        "unitId": "sg3-25-1",
+        "shipper": "VPHI",
+        "bookingNo": "FBSIN260400",
+        "position": {
+          "x": 135,
+          "y": 0,
+          "z": 41
+        },
+        "size": {
+          "width": 71,
+          "length": 114,
+          "height": 114
+        },
+        "weight": 250,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 3
+      },
+      {
+        "cargoId": "sg3-25",
+        "unitId": "sg3-25-2",
+        "shipper": "VPHI",
+        "bookingNo": "FBSIN260400",
+        "position": {
+          "x": 114,
+          "y": 1116,
+          "z": 114
+        },
+        "size": {
+          "width": 114,
+          "length": 71,
+          "height": 114
+        },
+        "weight": 250,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 2
+      },
+      {
+        "cargoId": "sg3-24",
+        "unitId": "sg3-24-0",
+        "shipper": "VPHI",
+        "bookingNo": "FBSIN260400",
+        "position": {
+          "x": 0,
+          "y": 322,
+          "z": 41
+        },
+        "size": {
+          "width": 71,
+          "length": 114,
+          "height": 114
+        },
+        "weight": 186,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 3
+      },
+      {
+        "cargoId": "sg3-24",
+        "unitId": "sg3-24-1",
+        "shipper": "VPHI",
+        "bookingNo": "FBSIN260400",
+        "position": {
+          "x": 0,
+          "y": 436,
+          "z": 41
+        },
+        "size": {
+          "width": 71,
+          "length": 114,
+          "height": 114
+        },
+        "weight": 186,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 3
+      },
+      {
+        "cargoId": "sg3-27",
+        "unitId": "sg3-27-0",
+        "shipper": "한도신소재",
+        "bookingNo": "FBSIN260407",
+        "position": {
+          "x": 135,
+          "y": 1001,
+          "z": 128
+        },
+        "size": {
+          "width": 93,
+          "length": 110,
+          "height": 110
+        },
+        "weight": 450,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 3
+      }
+    ]
+  },
+  {
+    "index": 2,
+    "spec": {
+      "type": "40FT",
+      "maxWeightKg": 25000,
+      "maxCbm": 60,
+      "innerLength": 1200,
+      "innerWidth": 234,
+      "doorHeight": 258,
+      "innerHeight": 268
+    },
+    "totalWeight": 8990.892,
+    "placements": [
+      {
+        "cargoId": "sg3-26",
+        "unitId": "sg3-26-3",
+        "shipper": "ANC LOGISTICS",
+        "bookingNo": "FBSIN260406",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "width": 176,
+          "length": 151,
+          "height": 164
+        },
+        "weight": 400,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-26",
+        "unitId": "sg3-26-1",
+        "shipper": "ANC LOGISTICS",
+        "bookingNo": "FBSIN260406",
+        "position": {
+          "x": 0,
+          "y": 151,
+          "z": 0
+        },
+        "size": {
+          "width": 117,
+          "length": 113,
+          "height": 194
+        },
+        "weight": 400,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-26",
+        "unitId": "sg3-26-4",
+        "shipper": "ANC LOGISTICS",
+        "bookingNo": "FBSIN260406",
+        "position": {
+          "x": 0,
+          "y": 264,
+          "z": 0
+        },
+        "size": {
+          "width": 199,
+          "length": 87,
+          "height": 99
+        },
+        "weight": 400,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-26",
+        "unitId": "sg3-26-2",
+        "shipper": "ANC LOGISTICS",
+        "bookingNo": "FBSIN260406",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 164
+        },
+        "size": {
+          "width": 168,
+          "length": 87,
+          "height": 99
+        },
+        "weight": 400,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-26",
+        "unitId": "sg3-26-0",
+        "shipper": "ANC LOGISTICS",
+        "bookingNo": "FBSIN260406",
+        "position": {
+          "x": 117,
+          "y": 151,
+          "z": 0
+        },
+        "size": {
+          "width": 110,
+          "length": 110,
+          "height": 102
+        },
+        "weight": 400,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-30",
+        "unitId": "sg3-30-0",
+        "shipper": "FLOWBUS",
+        "bookingNo": "FBSIN260417",
+        "position": {
+          "x": 0,
+          "y": 351,
+          "z": 0
+        },
+        "size": {
+          "width": 116,
+          "length": 326,
+          "height": 110
+        },
+        "weight": 1880,
+        "remarks": {
+          "noStacking": true,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-30",
+        "unitId": "sg3-30-1",
+        "shipper": "FLOWBUS",
+        "bookingNo": "FBSIN260417",
+        "position": {
+          "x": 116,
+          "y": 351,
+          "z": 0
+        },
+        "size": {
+          "width": 116,
+          "length": 326,
+          "height": 110
+        },
+        "weight": 1880,
+        "remarks": {
+          "noStacking": true,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-16",
+        "unitId": "sg3-16-0",
+        "shipper": "리틀스푼",
+        "bookingNo": "FBSIN260445",
+        "position": {
+          "x": 0,
+          "y": 677,
+          "z": 0
+        },
+        "size": {
+          "width": 110,
+          "length": 200,
+          "height": 100
+        },
+        "weight": 100,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 2
+      },
+      {
+        "cargoId": "sg3-16",
+        "unitId": "sg3-16-1",
+        "shipper": "리틀스푼",
+        "bookingNo": "FBSIN260445",
+        "position": {
+          "x": 0,
+          "y": 677,
+          "z": 100
+        },
+        "size": {
+          "width": 110,
+          "length": 200,
+          "height": 100
+        },
+        "weight": 100,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": true,
+        "faceIdx": 2
+      },
+      {
+        "cargoId": "sg3-17",
+        "unitId": "sg3-17-0",
+        "shipper": "SUNGSHINTECH",
+        "bookingNo": "FBSIN260450",
+        "position": {
+          "x": 110,
+          "y": 677,
+          "z": 0
+        },
+        "size": {
+          "width": 110,
+          "length": 130,
+          "height": 140
+        },
+        "weight": 552,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-15",
+        "unitId": "sg3-15-0",
+        "shipper": "카버코리아",
+        "bookingNo": "FBSIN260459",
+        "position": {
+          "x": 110,
+          "y": 807,
+          "z": 0
+        },
+        "size": {
+          "width": 110,
+          "length": 110,
+          "height": 155
+        },
+        "weight": 231.297,
+        "remarks": {
+          "noStacking": true,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-15",
+        "unitId": "sg3-15-1",
+        "shipper": "카버코리아",
+        "bookingNo": "FBSIN260459",
+        "position": {
+          "x": 110,
+          "y": 917,
+          "z": 0
+        },
+        "size": {
+          "width": 110,
+          "length": 110,
+          "height": 155
+        },
+        "weight": 231.297,
+        "remarks": {
+          "noStacking": true,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-15",
+        "unitId": "sg3-15-2",
+        "shipper": "카버코리아",
+        "bookingNo": "FBSIN260459",
+        "position": {
+          "x": 0,
+          "y": 877,
+          "z": 0
+        },
+        "size": {
+          "width": 110,
+          "length": 110,
+          "height": 155
+        },
+        "weight": 231.297,
+        "remarks": {
+          "noStacking": true,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-1",
+        "unitId": "sg3-1-1",
+        "shipper": "나투라미디어 &",
+        "bookingNo": "FBSIN260363",
+        "position": {
+          "x": 0,
+          "y": 1027,
+          "z": 0
+        },
+        "size": {
+          "width": 121,
+          "length": 111,
+          "height": 127
+        },
+        "weight": 188.667,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-1",
+        "unitId": "sg3-1-2",
+        "shipper": "나투라미디어 &",
+        "bookingNo": "FBSIN260363",
+        "position": {
+          "x": 121,
+          "y": 1027,
+          "z": 0
+        },
+        "size": {
+          "width": 111,
+          "length": 161,
+          "height": 90
+        },
+        "weight": 188.667,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 1
+      },
+      {
+        "cargoId": "sg3-1",
+        "unitId": "sg3-1-0",
+        "shipper": "나투라미디어 &",
+        "bookingNo": "FBSIN260363",
+        "position": {
+          "x": 0,
+          "y": 1027,
+          "z": 127
+        },
+        "size": {
+          "width": 111,
+          "length": 101,
+          "height": 102
+        },
+        "weight": 188.667,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-5",
+        "unitId": "sg3-5-0",
+        "shipper": "삼원코브라",
+        "bookingNo": "FBSIN260422",
+        "position": {
+          "x": 117,
+          "y": 151,
+          "z": 102
+        },
+        "size": {
+          "width": 110,
+          "length": 110,
+          "height": 132
+        },
+        "weight": 350,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-18",
+        "unitId": "sg3-18-0",
+        "shipper": "에스앤비테크",
+        "bookingNo": "FBSIN260458",
+        "position": {
+          "x": 110,
+          "y": 677,
+          "z": 140
+        },
+        "size": {
+          "width": 105,
+          "length": 105,
+          "height": 110
+        },
+        "weight": 320,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-3",
+        "unitId": "sg3-3-0",
+        "shipper": "폰브",
+        "bookingNo": "FBSIN260410",
+        "position": {
+          "x": 176,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "width": 50,
+          "length": 80,
+          "height": 265
+        },
+        "weight": 115,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 5
+      },
+      {
+        "cargoId": "sg3-21",
+        "unitId": "sg3-21-0",
+        "shipper": "삼성전자",
+        "bookingNo": "FBSIN260344",
+        "position": {
+          "x": 121,
+          "y": 1027,
+          "z": 90
+        },
+        "size": {
+          "width": 111,
+          "length": 111,
+          "height": 68
+        },
+        "weight": 64,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "top",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-33",
+        "unitId": "sg3-33-0",
+        "shipper": "씨엔스타",
+        "bookingNo": "FBSIN260429",
+        "position": {
+          "x": 0,
+          "y": 1138,
+          "z": 0
+        },
+        "size": {
+          "width": 91,
+          "length": 61,
+          "height": 104
+        },
+        "weight": 136,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": false,
+        "faceIdx": 0
+      },
+      {
+        "cargoId": "sg3-19",
+        "unitId": "sg3-19-0",
+        "shipper": "나라오토시스",
+        "bookingNo": "FBSIN260460",
+        "position": {
+          "x": 176,
+          "y": 80,
+          "z": 0
+        },
+        "size": {
+          "width": 35,
+          "length": 68,
+          "height": 86
+        },
+        "weight": 234,
+        "remarks": {
+          "noStacking": false,
+          "topOnly": false,
+          "orientation": "free",
+          "heavierBelow": false
+        },
+        "layer": "bottom",
+        "rotated": true,
+        "faceIdx": 5
+      }
+    ]
+  }
+]
