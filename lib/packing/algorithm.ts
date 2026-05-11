@@ -45,6 +45,8 @@ import {
 } from "./extreme-point.ts";
 import { allowedFaces, effectiveSizeFace } from "./constraints.ts";
 import { computeDisplayRows } from "./display-rows.ts";
+import { strictStackAudit } from "./audit.ts";
+import { resetBruteForceBudget, clearBruteForceFailureCache } from "./extreme-point.ts";
 import {
   preClusterFootprint,
   type FootprintClusterOptions,
@@ -494,6 +496,14 @@ function finalizeContainer(c: ContainerState): ContainerPlan {
     bulkItems: c.bulkItems,
     cbmFillRate,
     weightFillRate,
+    // strictStackAudit 용 placement 좌표·무게 사본 (display 변환 무관, 원본 보존)
+    placements: c.packState.placements.map((p) => ({
+      cargoId: p.cargoId,
+      shipper: p.shipper,
+      weight: p.weight,
+      position: { x: p.position.x, y: p.position.y, z: p.position.z },
+      size: { width: p.size.width, length: p.size.length, height: p.size.height },
+    })),
   };
 }
 
@@ -969,6 +979,9 @@ export function pack(
   mode: ContainerMode,
   options?: PackOptions,
 ): CLPResult {
+  // brute-force 호출 budget 카운터 리셋 (per pack-attempt)
+  resetBruteForceBudget();
+
   // 1) 분류
   const { visualCargoes, ctCargoes, completedCargoes } = classify(cargoes);
 
@@ -2060,6 +2073,9 @@ export function packBest(
   mode: ContainerMode,
   options?: PackBestOptions,
 ): CLPResult {
+  // brute-force 실패 cache 비우기 — 매 packBest 호출 사이에 잔여 영향 차단
+  clearBruteForceFailureCache();
+
   const lightMode = options?.lightMode === true;
   // lightMode: 가장 효과 좋은 2개 정렬만 (ldf=대각선 우선, longest-side=장축 우선)
   const strategies: PackOptions["sortStrategy"][] = lightMode
@@ -2304,10 +2320,16 @@ export function packBest(
   // lightMode: 백트래킹 12 → 1회로 (시간 예산 보호; (a) input front 만 한 번 시도)
   const MAX_BACKTRACK = lightMode ? 1 : 12;
   let inputOrder = [...cargoes];
+  // 같은 unplaced cargoId 셋이 두 번 이상 등장하면 백트래킹 중단 (개발자 권고: 무한 회전 차단)
+  const seenUnplacedSets = new Set<string>();
   for (let iter = 0; iter < MAX_BACKTRACK; iter++) {
     if (current.unplaced.length === 0) break;
     const unplacedIds = current.unplaced.map((u) => u.cargoId);
     if (unplacedIds.length === 0) break;
+    // 같은 미배치 셋 반복 감지 — 두 번째 등장이면 break (헛수고 차단)
+    const setKey = [...unplacedIds].sort().join("|");
+    if (seenUnplacedSets.has(setKey)) break;
+    seenUnplacedSets.add(setKey);
     let improved = false;
 
     // (a) 미배치 전체를 맨 앞으로 — input strategy 사용

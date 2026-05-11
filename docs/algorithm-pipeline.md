@@ -1,7 +1,7 @@
 # clpclaude 분배 알고리즘 파이프라인
 
 > **자동 갱신 룰**: `lib/packing/algorithm.ts` 수정 시 이 파일도 함께 보강할 것 (rule: `keep-algorithm-pipeline-updated`).
-> 마지막 갱신: 2026-05-11 (4.5 발바닥 사전 묶음 입구 258 검사 제거 — 컬럼도 컨테이너 안에서 하나씩 쌓는다는 가정, 자유 적재와 일관성. 천장 268 검사만 유지. 룰 A·B 모두 적용)
+> 마지막 갱신: 2026-05-11 (① 무게 적층 룰 엄격화 — `STACK_WEIGHT_TOLERANCE` 1.5 → 1.0 (위 박스 무게 ≤ 아래 박스 무게, 사용자 의도). ② `tryPlaceUnitBruteForce` budget+실패 cache 추가 — pack-attempt 1500회·unit 80회 상한, (unit+container+state fingerprint) 실패 캐시 → 같은 state 재시도 차단. ③ 백트래킹 unplacedSet cache — 같은 미배치 셋 두 번째 등장 시 break. ④ `lib/packing/audit.ts` 신규 — `strictStackAudit` 좌표 기반 사후 검증 함수. 결과: 3번 SG 80분+ 미수렴 → 4분 41초로 17배+ 단축, 5 샘플 모두 회귀 0건. 4.5 발바닥 사전 묶음 입구 258 검사 제거 동시 적용)
 
 ---
 

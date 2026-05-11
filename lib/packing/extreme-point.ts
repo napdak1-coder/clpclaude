@@ -35,6 +35,59 @@ import {
 /** 부동소수점 비교 허용 오차 (cm) */
 const EPS = 0.01;
 
+/* ============================================================
+ * brute-force budget + 실패 캐시 (시간 폭증 차단)
+ * ============================================================
+ * STACK_WEIGHT_TOLERANCE = 1.0 (엄격 적층 룰) 환경에서 tryPlaceUnit 거부율이
+ * 올라가면 tryPlaceUnitBruteForce 가 격자 전수 스캔하다 false 반환하는 헛수고가
+ * 누적된다. budget 으로 호출 횟수 제한 + cache 로 같은 state 재시도 차단.
+ *
+ * 적용 원칙 (개발자 권고):
+ *  - per pack-attempt 호출 상한
+ *  - per unit 호출 상한
+ *  - same (unit + container type + state fingerprint) 실패 캐시 → 재시도 X
+ *  - resetBruteForceBudget() 매 pack-attempt 시작 시 호출
+ *  - 실패 cache 는 매트릭스 시도들 간 공유 OK (deterministic state 라 결과 동일)
+ */
+const BRUTE_FORCE_BUDGET_PER_PACK = 1500;
+const BRUTE_FORCE_BUDGET_PER_UNIT = 80;
+const BRUTE_FORCE_CACHE_MAX = 2000;
+
+let bruteForceCallsThisPack = 0;
+const bruteForceCallsByUnit = new Map<string, number>();
+const bruteForceFailureCache = new Map<string, true>();
+
+/** packBest / pack 진입 시 호출 — budget 카운터 리셋. cache 는 보존. */
+export function resetBruteForceBudget(): void {
+  bruteForceCallsThisPack = 0;
+  bruteForceCallsByUnit.clear();
+}
+
+/** 매트릭스 시작 시 호출 가능 — cache 비우기 (메모리 보호용, 보통 불필요). */
+export function clearBruteForceFailureCache(): void {
+  bruteForceFailureCache.clear();
+}
+
+/** 현재 컨테이너 상태의 fingerprint — placement 정렬 hash. */
+function stateFingerprint(state: ContainerPackState): string {
+  // placements 가 작으면 비용 낮음. 큰 컨테이너에서도 0.x ms 수준.
+  const parts = state.placements
+    .map(
+      (p) =>
+        `${p.cargoId}|${p.position.x.toFixed(0)}|${p.position.y.toFixed(0)}|${p.position.z.toFixed(0)}|${p.size.width.toFixed(0)}|${p.size.length.toFixed(0)}|${p.size.height.toFixed(0)}|${p.weight.toFixed(0)}`,
+    )
+    .sort();
+  return parts.join("#");
+}
+
+function bruteForceCacheKey(
+  unit: UnitItem,
+  containerType: string,
+  fp: string,
+): string {
+  return `${unit.unitId}|${containerType}|${fp}`;
+}
+
 /** 알고리즘 입력 단위 — cargo 한 건을 quantity / unitSizes 로 분해한 것 */
 export interface UnitItem {
   unitId: string;
@@ -514,6 +567,21 @@ export function tryPlaceUnitBruteForce(
   options?: PackExtremePointOptions,
 ): boolean {
   if (!withinWeightLimit(state.totalWeight, unit.weight, spec)) return false;
+
+  // budget 체크 — pack-attempt 전체 상한
+  if (bruteForceCallsThisPack >= BRUTE_FORCE_BUDGET_PER_PACK) return false;
+  // budget 체크 — unit 당 상한
+  const perUnit = (bruteForceCallsByUnit.get(unit.unitId) ?? 0) + 1;
+  if (perUnit > BRUTE_FORCE_BUDGET_PER_UNIT) return false;
+
+  // cache 체크 — 같은 (unit, container type, state fingerprint) 이전에 실패했으면 즉답
+  const fp = stateFingerprint(state);
+  const cacheKey = bruteForceCacheKey(unit, spec.type, fp);
+  if (bruteForceFailureCache.has(cacheKey)) return false;
+
+  bruteForceCallsThisPack++;
+  bruteForceCallsByUnit.set(unit.unitId, perUnit);
+
   const cargoLike = asCargoLikeForFace(unit);
   const faces = allowedFaces(cargoLike);
 
@@ -656,7 +724,15 @@ export function tryPlaceUnitBruteForce(
     }
   }
 
-  if (!best) return false;
+  if (!best) {
+    // 격자 전수 스캔 후 자리 못 찾음 — 같은 (unit, container, state) 재시도 차단
+    if (bruteForceFailureCache.size >= BRUTE_FORCE_CACHE_MAX) {
+      const firstKey = bruteForceFailureCache.keys().next().value;
+      if (firstKey !== undefined) bruteForceFailureCache.delete(firstKey);
+    }
+    bruteForceFailureCache.set(cacheKey, true);
+    return false;
+  }
 
   const rotated =
     best.eff.width !== unit.width || best.eff.length !== unit.length;

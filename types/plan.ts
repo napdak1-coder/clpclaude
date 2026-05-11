@@ -73,6 +73,19 @@ export interface BulkItem {
   group: "ct" | "completed";
 }
 
+/**
+ * 적층 무게 룰 audit (strictStackAudit) 가 사용하는 최소 좌표·무게 정보.
+ * `Placement3D` 의 핵심 필드만 노출 — `lib/packing/extreme-point.ts` 에서
+ * 직접 가져오면 circular import 위험이 있어 별도 정의.
+ */
+export interface PlanPlacement {
+  cargoId: string;
+  shipper?: string;
+  weight: number;
+  position: { x: number; y: number; z: number };
+  size: { width: number; length: number; height: number };
+}
+
 export interface ContainerPlan {
   index: number;                 // 1, 2, 3...
   spec: ContainerSpec;
@@ -91,6 +104,12 @@ export interface ContainerPlan {
   bulkItems: BulkItem[];
   cbmFillRate: number;           // % — (시각 + ct + completed) / maxCbm × 100
   weightFillRate: number;        // %
+  /**
+   * 적층 무게 룰 audit (strictStackAudit) 용 placement 좌표·무게 사본.
+   * display-rows 변환 전 packState.placements 의 핵심 필드만 보존.
+   * 시각 화물만 포함 (CT/완료 bulk 는 좌표 없으므로 audit 대상 X).
+   */
+  placements?: PlanPlacement[];
 }
 
 export type ContainerMode = "auto" | "20ft_only" | "40ft_only";
