@@ -142,9 +142,24 @@ export interface UnplacedItem {
   group?: "visual" | "ct" | "completed";
 }
 
+/**
+ * 더 작은 트럭 셋으로도 적재 가능한 대안.
+ * `decideContainers` 가 안전 위해 큰 셋 (예: 40FT + 20FT) 골랐지만, 시뮬 결과
+ * 더 작은 셋 (예: 40FT × 1) 으로 미배치 0 + 무게 룰 통과 가능하면 채워진다.
+ * 사용자가 화면에서 토스트·배너 보고 "변경" 선택 시 이 결과로 교체.
+ */
+export interface CLPAlternative {
+  containers: ContainerPlan[];
+  unplaced: UnplacedItem[];
+  /** 사용자에게 표시할 한국어 설명 (예: "40FT × 1 (트럭 1대 절감 가능)") */
+  description: string;
+}
+
 export interface CLPResult {
   containers: ContainerPlan[];
   unplaced: UnplacedItem[];
+  /** 더 작은 트럭 셋 대안 (있을 때만) */
+  alternative?: CLPAlternative;
   summary: {
     count20FT: number;
     count40FT: number;

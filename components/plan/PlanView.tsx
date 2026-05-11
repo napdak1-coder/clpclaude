@@ -51,7 +51,26 @@ export function PlanView({
 }: PlanViewProps) {
   const router = useRouter();
   const [preview, setPreview] = useState<PreviewState | null>(null);
-  const result = preview?.result ?? originalResult;
+  // 더 작은 트럭 셋 대안 (originalResult.alternative) 적용 토글.
+  // packBest 가 빈 트럭 발견 시 alternative 자동 보존 → 사용자가 배너 보고 선택.
+  const [useAlternative, setUseAlternative] = useState(false);
+  const baseResult = preview?.result ?? originalResult;
+  const altActive = useAlternative && originalResult.alternative != null;
+  const result = altActive
+    ? {
+        ...baseResult,
+        containers: originalResult.alternative!.containers,
+        summary: {
+          ...baseResult.summary,
+          count20FT: originalResult.alternative!.containers.filter(
+            (c) => c.spec.type === "20FT",
+          ).length,
+          count40FT: originalResult.alternative!.containers.filter(
+            (c) => c.spec.type === "40FT",
+          ).length,
+        },
+      }
+    : baseResult;
 
   const containerCount = result.containers.length;
   const [activeIdx, setActiveIdx] = useState(0);
@@ -197,6 +216,21 @@ export function PlanView({
             <PdfExport targetRef={printAreaRef} fileLabel={fileLabel} />
             <ShareLink planId={planId} initialToken={shareToken} />
           </div>
+        </div>
+      )}
+
+      {originalResult.alternative && !preview && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border-2 border-blue-400 bg-blue-50 px-3 py-2">
+          <div className="text-sm text-blue-900">
+            💡 <strong>더 작은 트럭 셋으로도 적재 가능</strong> — {originalResult.alternative.description}
+          </div>
+          <button
+            type="button"
+            onClick={() => setUseAlternative(!useAlternative)}
+            className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+          >
+            {useAlternative ? "원래 분배로" : "이 안 적용"}
+          </button>
         </div>
       )}
 

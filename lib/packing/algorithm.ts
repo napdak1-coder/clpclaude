@@ -299,12 +299,12 @@ function decideContainers(
     if (fits.length > 0) prefer = fits;
   }
 
-  // 2.5순위: 안전마진 — slack(잉여 용량) 1.5m³ 미만 조합은 만재 위험으로 제외.
-  // 임계값은 실 사례 기반: 1ST SG slack 18.26 ✓, HM 1ST slack 2.26 ✓, 2ST SG slack 0.82 reject.
-  // 모든 조합이 < 1.5 이면 룰 미적용 (강제 만재 허용).
-  const SAFETY_BUFFER_CBM = 1.5;
-  const safe = prefer.filter((c) => c.capacity - totalCbm >= SAFETY_BUFFER_CBM);
-  if (safe.length > 0) prefer = safe;
+  // 2.5순위: 안전마진 — 제거 (2026-05-11). 사유: maxCbm 60 (40FT) 자체가 이미
+  // 공식 67 CBM 의 약 90% 안전마진 포함. 추가 안전마진은 이중 적용으로 과보수.
+  // 망작 같은 60.032 CBM 케이스 흡수 위해 alternative 토스트 안으로 대체.
+  // const SAFETY_BUFFER_CBM = 1.5;
+  // const safe = prefer.filter((c) => c.capacity - totalCbm >= SAFETY_BUFFER_CBM);
+  // if (safe.length > 0) prefer = safe;
 
   // 3순위: 잉여 용량(capacity - totalCbm) 가장 적은 조합 → 가장 알맞은 크기
   const minSlack = Math.min(...prefer.map((c) => c.capacity - totalCbm));
@@ -2454,6 +2454,32 @@ export function packBest(
         }
       }
     }
+  }
+
+  // alternative 토스트 — 빈 트럭(visual + bulk 0)이 있으면 제거 버전을 alternative 로 보존.
+  // 사용자가 화면에서 보고 "변경" 누르면 빈 트럭 제거된 결과로 교체. 자동 적용 X.
+  // 예: 망작 케이스 — 40FT(21행) + 20FT(0행) → alternative = 40FT(21행) (트럭 1대 절감)
+  const isEmptyContainer = (c: ContainerPlan): boolean => {
+    const visualCount = (c.rows ?? []).reduce(
+      (s, r) =>
+        s +
+        ((r.bottomItems?.length ?? 0) + (r.topItems?.length ?? 0)),
+      0,
+    );
+    const bulkCount = (c.bulkItems ?? []).length;
+    return visualCount + bulkCount === 0;
+  };
+  const emptyContainers = current.containers.filter(isEmptyContainer);
+  if (emptyContainers.length > 0 && current.containers.length - emptyContainers.length > 0) {
+    const nonEmpty = current.containers.filter((c) => !isEmptyContainer(c));
+    const removedTypes = emptyContainers.map((c) => c.spec.type);
+    const removedSummary = removedTypes.join(" + ");
+    const altSetSummary = nonEmpty.map((c) => c.spec.type).join(" + ");
+    current.alternative = {
+      containers: nonEmpty,
+      unplaced: current.unplaced,
+      description: `${altSetSummary} (트럭 ${emptyContainers.length}대 절감 가능 — ${removedSummary} 빈 트럭)`,
+    };
   }
 
   return current;
