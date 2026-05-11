@@ -472,6 +472,12 @@ const SAMPLE_FILES: Array<{
     url: "/samples/hochiminh-total-2.xlsx",
     filename: "호치민 TOTAL 두번째.xlsx",
   },
+  {
+    key: "hochiminh-total-3",
+    label: "3ST HM TOTAL",
+    url: "/samples/hochiminh-total-3.xlsx",
+    filename: "호치민 TOTAL 세번째.xlsx",
+  },
 ];
 
 export function ExcelImport({ onImport }: ExcelImportProps) {
