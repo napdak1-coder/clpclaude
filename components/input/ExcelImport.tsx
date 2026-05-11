@@ -478,6 +478,12 @@ const SAMPLE_FILES: Array<{
     url: "/samples/hochiminh-total-3.xlsx",
     filename: "호치민 TOTAL 세번째.xlsx",
   },
+  {
+    key: "singapore-mangjak-total",
+    label: "3ST 망작",
+    url: "/samples/singapore-mangjak-total.xlsx",
+    filename: "싱가폴 망작 토탈.xlsx",
+  },
 ];
 
 export function ExcelImport({ onImport }: ExcelImportProps) {
