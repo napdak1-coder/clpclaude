@@ -180,9 +180,9 @@ function tryPlaceColumn(
   spec: ContainerSpec,
   deepAnchor: boolean,
 ): UnitItem[] {
-  // doorHeight 초과면 column 자체 포기
-  const doorH = spec.doorHeight ?? spec.innerHeight;
-  if (col.totalHeight > doorH) return col.units; // 전체 fail
+  // 천장 높이 초과면 column 자체 포기
+  // (사전 묶음은 입구 258 검사 X — 컬럼도 컨테이너 안에서 하나씩 쌓는다는 가정, 자유 적재와 일관성)
+  if (col.totalHeight > spec.innerHeight) return col.units; // 전체 fail
   // heavierBelow chain 검증 — 인접 쌍 모두 통과해야
   for (let i = 0; i < col.units.length - 1; i++) {
     if (!canStackPair(col.units[i + 1], col.units[i])) return col.units;
@@ -217,11 +217,7 @@ function tryPlaceColumn(
   const pl = placed.size.length;
   for (let i = 1; i < col.units.length; i++) {
     const u = col.units[i];
-    // door 높이 초과 검사
-    if (curZ + u.height > doorH + 0.01) {
-      // 이후 unit 은 여기 못 올림 — 이미 배치된 것은 유지, 나머지 fallback
-      return col.units.slice(i);
-    }
+    // 천장 높이 초과 검사 (입구 검사는 사전 묶음에서 제거 — 안에서 하나씩 쌓음)
     if (curZ + u.height > spec.innerHeight + 0.01) {
       return col.units.slice(i);
     }
@@ -293,10 +289,9 @@ function tryAbsorbOnColumns(
       ratio: number;
     }
     let best: Spot | null = null;
-    const doorH = spec.doorHeight ?? spec.innerHeight;
+    // 입구 258 검사 X — 사전 묶음은 안에서 하나씩 쌓는 가정 (자유 적재와 일관성)
     for (const p of state.placements) {
       const topZ = p.position.z + p.size.height;
-      if (topZ + u.height > doorH + 0.01) continue;
       if (topZ + u.height > spec.innerHeight + 0.01) continue;
       // 받침 비율 = u.footprint / supporter.footprint (둘 다 같은 평면 기준)
       const supW = p.size.width;

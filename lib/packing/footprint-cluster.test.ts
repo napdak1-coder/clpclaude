@@ -100,13 +100,14 @@ describe("footprint-cluster: preClusterFootprint 룰 A — 부킹 내부 컬럼"
     assert.deepEqual(zs, [0, 71, 142]);
   });
 
-  it("doorHeight 초과 시 컬럼 거부 (3단 213 + 93 = 306 > 258)", () => {
+  it("천장(innerHeight=268) 초과 시 컬럼 거부 (4단 71×4 = 284 > 268)", () => {
     const cont = {
       index: 1,
       spec: SPEC_40FT,
       packState: makeContainerState(),
     };
-    // 3단 자체는 213cm OK 지만 4단 시도 시 284 > 258
+    // 3단 = 213 OK, 4단 = 284 > 268 천장 위반
+    // (입구 258 검사는 사전 묶음에서 제거 — 자유 적재와 일관성, 컬럼도 안에서 하나씩 쌓는다는 가정)
     const units: UnitItem[] = [
       mkUnit({ unitId: "u1", cargoId: "c1", bookingNo: "BK-X", width: 114, length: 114, height: 71, weight: 200 }),
       mkUnit({ unitId: "u2", cargoId: "c1", bookingNo: "BK-X", width: 114, length: 114, height: 71, weight: 200 }),
@@ -115,10 +116,9 @@ describe("footprint-cluster: preClusterFootprint 룰 A — 부킹 내부 컬럼"
       mkUnit({ unitId: "u5", cargoId: "c2", bookingNo: "BK-Y", width: 50, length: 50, height: 50 }),
     ];
     const placed = preClusterFootprint(cont, units);
-    // 4단 = 284 > 258 → 컬럼 전체 거부 (혹은 일부만)
-    // 안전한 검증: door 초과로 거부되거나, 배치된 것 모두 z + h ≤ 258
+    // 모든 배치는 z + h ≤ 268 (천장)
     for (const p of cont.packState.placements) {
-      assert.ok(p.position.z + p.size.height <= 258 + 0.01, `door 높이 위반: ${p.unitId} z=${p.position.z} h=${p.size.height}`);
+      assert.ok(p.position.z + p.size.height <= 268 + 0.01, `천장 높이 위반: ${p.unitId} z=${p.position.z} h=${p.size.height}`);
     }
   });
 
