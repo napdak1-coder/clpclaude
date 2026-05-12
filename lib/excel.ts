@@ -565,13 +565,25 @@ function guessField(header: string): FieldKey | null {
   return null;
 }
 
-/** 헤더 배열을 받아 필드 매핑 추정 — 결과는 사용자가 UI 에서 보정 */
+/**
+ * 헤더 배열을 받아 필드 매핑 추정 — 결과는 사용자가 UI 에서 보정.
+ * 같은 field 가 여러 헤더에서 매핑되면 첫 헤더만 채택, 나머지는 null.
+ * 예: 메모 헤더 "입고된 화물 60CBM 가까이..." 가 'cbm' 키워드 포함이라
+ *     진짜 "CFS CBM" 컬럼 매핑을 덮어쓰는 충돌 차단.
+ */
 export function mapHeadersToFields(
   headers: string[],
 ): Record<string, FieldKey | null> {
   const out: Record<string, FieldKey | null> = {};
+  const usedFields = new Set<FieldKey>();
   for (const h of headers) {
-    out[h] = guessField(h);
+    const f = guessField(h);
+    if (f && !usedFields.has(f)) {
+      out[h] = f;
+      usedFields.add(f);
+    } else {
+      out[h] = null;
+    }
   }
   return out;
 }
