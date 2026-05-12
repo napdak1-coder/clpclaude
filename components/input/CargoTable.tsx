@@ -231,6 +231,11 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
           {hideShippers ? "👁 화주 다시 보기" : "🙈 화주 숨기기"}
         </button>
       </div>
+      {distInfo.distributedFields.size > 0 && (
+        <div className="rounded border-2 border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <strong>⚠️ 자동 분배되었습니다</strong> — 같은 부킹 안 한 행에만 무게/CBM/ABOUT 값이 몰려있어 수량 비율로 자동 분배됨 ({distInfo.distributedFields.size}행 영향). 빨간 글씨로 표시된 셀이 분배된 값입니다.
+        </div>
+      )}
       <table className="w-full table-fixed text-xs">
         <colgroup>
           {colWidths.map((w, i) => (
