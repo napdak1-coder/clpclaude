@@ -837,15 +837,16 @@ describe("footprint-cluster: 룰 G — Row-lane 묶음 (preClusterRowLane)", () 
     __testables.resetRowLaneDecision();
     // 137×115 fixed → face 0 (W=137) 만 가능. 두 컬럼 274 > 234 → 한 컬럼만.
     // 한 컬럼 안 직렬: 115 + 115 = 230 길이 OK.
-    const fixedRem = { noStacking: false, topOnly: false, orientation: "fixed" as const, heavierBelow: false };
+    // (룰 G 활성 조건: noStacking=true + variable unitSizes — 한 박스 width 138 로 미세 변경)
+    const fixedRem = { noStacking: true, topOnly: false, orientation: "fixed" as const, heavierBelow: false };
     const units: UnitItem[] = [
       mkUnit({ unitId: "u1", cargoId: "c1", bookingNo: "BK-X", width: 137, length: 115, height: 85, weight: 200, remarks: fixedRem }),
-      mkUnit({ unitId: "u2", cargoId: "c1", bookingNo: "BK-X", width: 137, length: 115, height: 85, weight: 200, remarks: fixedRem }),
+      mkUnit({ unitId: "u2", cargoId: "c1", bookingNo: "BK-X", width: 138, length: 115, height: 85, weight: 200, remarks: fixedRem }),
     ];
     const face = __testables.pickLaneFace(units);
     assert.equal(face, 0, "orientation=fixed → face 0 만");
     const placed = preClusterRowLane(cont, units);
-    // face 0 — W 137 → 두 컬럼 274 > 234 → 한 컬럼만 가능. 한 컬럼 직렬 길이 230 ≤ 1200 OK.
+    // face 0 — max W 138 → 두 컬럼 276 > 234 → 한 컬럼만. 한 컬럼 직렬 길이 230 ≤ 1200 OK.
     assert.equal(placed.size, 2, `한 컬럼 안 직렬 2박스 모두 배치 (실제: ${placed.size})`);
     // 한 컬럼만 — x 종류 1
     const xs = new Set(cont.packState.placements.map((p) => p.position.x));
@@ -861,13 +862,14 @@ describe("footprint-cluster: 룰 G — Row-lane 묶음 (preClusterRowLane)", () 
     __testables.resetRowLaneDecision();
     // 큰 박스 폭 160 — face 회전해도 둘째 컬럼 못 만듦. 한 컬럼 직렬.
     // 큰 박스라 회전 시 length=160, width=200 같은 face 도 폭 위반. fixed 로 한 면만:
-    const fixedRem = { noStacking: false, topOnly: false, orientation: "fixed" as const, heavierBelow: false };
+    // (룰 G 활성 조건: noStacking=true + variable unitSizes — 한 박스 length 161 로 미세 변경)
+    const fixedRem = { noStacking: true, topOnly: false, orientation: "fixed" as const, heavierBelow: false };
     const units: UnitItem[] = [
       mkUnit({ unitId: "u1", cargoId: "c1", bookingNo: "BK-X", width: 200, length: 160, height: 100, weight: 200, remarks: fixedRem }),
-      mkUnit({ unitId: "u2", cargoId: "c1", bookingNo: "BK-X", width: 200, length: 160, height: 100, weight: 200, remarks: fixedRem }),
+      mkUnit({ unitId: "u2", cargoId: "c1", bookingNo: "BK-X", width: 200, length: 161, height: 100, weight: 200, remarks: fixedRem }),
     ];
     const placed = preClusterRowLane(cont, units);
-    // 한 컬럼: y 직렬 160+160=320 ≤ 1200 OK. 폭 200 ≤ 234 OK.
+    // 한 컬럼: y 직렬 160+161=321 ≤ 1200 OK. 폭 200 ≤ 234 OK.
     assert.equal(placed.size, 2, "한 컬럼 직렬 2박스");
     const xs = new Set(cont.packState.placements.map((p) => p.position.x));
     assert.equal(xs.size, 1, "둘째 컬럼 폭 위반 — 한 컬럼만");
@@ -883,13 +885,14 @@ describe("footprint-cluster: 룰 G — Row-lane 묶음 (preClusterRowLane)", () 
     // 컨 길이 1200 — 큰 박스 5개 직렬 시 한 컬럼 길이 5×400=2000 > 1200 위반.
     // 두 컬럼 폭 (400×2=800 > 234) 위반 → 한 컬럼만 가능.
     // 한 컬럼 길이 1200 한도 — 박스 length 400 → 3개 배치, 4·5번째 못 들어감 → atomic 위반 → 전체 롤백
-    const fixedRem = { noStacking: false, topOnly: false, orientation: "fixed" as const, heavierBelow: false };
+    // (룰 G 활성 조건: noStacking=true + variable unitSizes — 마지막 박스 length 401 로 미세 변경)
+    const fixedRem = { noStacking: true, topOnly: false, orientation: "fixed" as const, heavierBelow: false };
     const units: UnitItem[] = [
       mkUnit({ unitId: "u1", cargoId: "c1", bookingNo: "BK-X", width: 200, length: 400, height: 100, weight: 200, remarks: fixedRem }),
       mkUnit({ unitId: "u2", cargoId: "c1", bookingNo: "BK-X", width: 200, length: 400, height: 100, weight: 200, remarks: fixedRem }),
       mkUnit({ unitId: "u3", cargoId: "c1", bookingNo: "BK-X", width: 200, length: 400, height: 100, weight: 200, remarks: fixedRem }),
       mkUnit({ unitId: "u4", cargoId: "c1", bookingNo: "BK-X", width: 200, length: 400, height: 100, weight: 200, remarks: fixedRem }),
-      mkUnit({ unitId: "u5", cargoId: "c1", bookingNo: "BK-X", width: 200, length: 400, height: 100, weight: 200, remarks: fixedRem }),
+      mkUnit({ unitId: "u5", cargoId: "c1", bookingNo: "BK-X", width: 200, length: 401, height: 100, weight: 200, remarks: fixedRem }),
     ];
     const placed = preClusterRowLane(cont, units);
     assert.equal(placed.size, 0, "atomic 위반 — 전체 롤백");
@@ -907,10 +910,11 @@ describe("footprint-cluster: 룰 G — Row-lane 묶음 (preClusterRowLane)", () 
     };
     __testables.resetRowLaneDecision();
     assert.equal(__testables.lastRowLaneDecision, null, "리셋 후 null");
+    // (룰 G 활성 조건: noStacking=true + variable unitSizes — 한 박스 width 101 로 미세 변경)
     const noStackRem = { noStacking: true, topOnly: false, orientation: "free" as const, heavierBelow: false };
     const units: UnitItem[] = [
       mkUnit({ unitId: "u1", cargoId: "log-c", bookingNo: "BK-LOG", width: 100, length: 100, height: 50, weight: 100, remarks: noStackRem }),
-      mkUnit({ unitId: "u2", cargoId: "log-c", bookingNo: "BK-LOG", width: 100, length: 100, height: 50, weight: 100, remarks: noStackRem }),
+      mkUnit({ unitId: "u2", cargoId: "log-c", bookingNo: "BK-LOG", width: 101, length: 100, height: 50, weight: 100, remarks: noStackRem }),
     ];
     preClusterRowLane(cont, units);
     const dec = __testables.lastRowLaneDecision;

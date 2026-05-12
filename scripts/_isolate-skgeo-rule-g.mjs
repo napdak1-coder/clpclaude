@@ -38,17 +38,18 @@ const SPEC_40FT = {
   type: "40FT", innerWidth: 234, innerLength: 1200, innerHeight: 268, maxWeightKg: 26500,
 };
 const containerLike = {
+  index: 0,
   spec: SPEC_40FT,
   packState: {
     placements: [],
-    candidates: [],
-    totalWeightKg: 0,
-    totalCbm: 0,
-    occupiedByY: new Map(),
+    candidates: [{ x: 0, y: 0, z: 0 }],
+    totalWeight: 0,
+    visualCbm: 0,
   },
 };
 
 console.log("\n=== preClusterRowLane 직접 호출 ===");
+__testables.resetRowLaneDecision();
 const placed = preClusterRowLane(containerLike, units);
 console.log("placed.size:", placed.size, "/ expected 3");
 console.log("packState.placements.length:", containerLike.packState.placements.length);

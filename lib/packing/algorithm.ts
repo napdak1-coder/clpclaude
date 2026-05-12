@@ -1842,6 +1842,41 @@ export function pack(
         }
       }
     }
+
+    // 5.36) **룰 G 사전 묶음 (preClusterRowLane)** — wrapper 모드, placeQueue 직전.
+    //
+    // noStacking=true + variable unitSizes + near footprint 조건 만족 cargoId 묶음을
+    // 일반 placeQueue 이전에 사전 배치. 일반 박스가 자리 잡기 전에 row-lane bundle
+    // 자리 확보 (laneLength 가 큰 편이라 늦으면 불리한 묶음 보호).
+    //
+    // 사례: SK GEO CENTRIC (FBSIN260431) sg3-35 — 135×115×129 ×2 + 137×115×85 ×1,
+    //   모두 noStacking=true, unit 사이즈 다름. fallback 단계는 일반 큐가 자리 다
+    //   차지한 뒤 호출되어 빈 공간 없음 → 사전 묶음으로 승격.
+    //
+    // 활성 조건은 groupNearRowLaneBundles 가 검증 (noStacking + variable + near).
+    // cargoId atomic 보호 — partial 발생 시 전체 롤백 (tryPlaceRowLaneBundle).
+    // fallback 단계 (5.44) 는 안전망으로 유지.
+    if (fpClusterEnabled && mode_placement === "wrapper") {
+      for (const cont of orderedContainers) {
+        const pool = generalUnits.filter((u) => {
+          if (placedByPreCluster.has(u.unitId)) return false;
+          const cands = candidatesFor(u);
+          return cands.includes(cont);
+        });
+        if (pool.length === 0) continue;
+        const placedIds = preClusterRowLane(
+          cont,
+          pool,
+          options?.footprintCluster,
+        );
+        for (const id of placedIds) {
+          placedByPreCluster.add(id);
+          const u = pool.find((x) => x.unitId === id);
+          if (u) recordBookingAnchor(u, cont);
+        }
+      }
+    }
+
     const placeQueue =
       mode_placement === "pure" ? placeQueuePure : placeQueueWrapper;
     placeQueue(generalUnits.filter((u) => !placedByPreCluster.has(u.unitId)));

@@ -1417,8 +1417,12 @@ function pickLaneFace(units: UnitItem[]): number | null {
 
 /**
  * 룰 G — 같은 cargoId 안에서 RowLaneBundle 후보 그룹 만들기.
- * 활성 조건 1·2·3·5·6·7 검증: same cargoId, noStacking 보호, W/L 차이 ≤ 5cm,
- * allowedFaces 교집합 존재, orientation=fixed 면 face 0 만 사용.
+ * 활성 조건 1·2·3·5·6·7 검증 + 추가 물리 일반 조건:
+ *   - noStacking=true 단 한 unit 이라도 있어야 (적층 금지 보호 필요한 묶음만)
+ *   - variable unitSizes — 같은 cargoId 안 unit 사이즈가 모두 정확히 동일하면 skip
+ *     (그런 묶음은 일반 큐가 잘 처리 — 룰 G 보호 불필요)
+ *   - near footprint (W/L 차이 ≤ NEAR_FOOTPRINT_TOL_CM)
+ *   - allowedFaces 교집합 존재, orientation=fixed 면 face 0 만 사용
  */
 function groupNearRowLaneBundles(units: UnitItem[]): RowLaneBundle[] {
   const byCargo = new Map<string, UnitItem[]>();
@@ -1432,6 +1436,18 @@ function groupNearRowLaneBundles(units: UnitItem[]): RowLaneBundle[] {
   const bundles: RowLaneBundle[] = [];
   for (const [cargoId, group] of byCargo) {
     if (group.length < ROW_LANE_MIN_UNITS) continue;
+    // 추가 조건 — 적어도 한 unit 이 noStacking=true (적층 금지 보호 필요한 묶음만)
+    const hasNoStacking = group.some((u) => u.remarks.noStacking === true);
+    if (!hasNoStacking) continue;
+    // 추가 조건 — variable unitSizes (모두 정확히 같은 사이즈이면 일반 큐가 처리)
+    const ref0 = group[0];
+    const allExactSame = group.every(
+      (u) =>
+        Math.abs(u.width - ref0.width) < 0.01 &&
+        Math.abs(u.length - ref0.length) < 0.01 &&
+        Math.abs(u.height - ref0.height) < 0.01,
+    );
+    if (allExactSame) continue;
     // 활성 조건 3 — 묶음 안 모든 박스 끼리 W/L 차이 ≤ NEAR_FOOTPRINT_TOL_CM
     const ref = group[0];
     const allClose = group.every((u) => nearSameFootprint(ref, u));
@@ -1712,15 +1728,6 @@ export function preClusterRowLane(
   if (containerCbm < minCbm) return placedIds;
 
   const bundles = groupNearRowLaneBundles(unplacedPool);
-  if (process.env.RULE_G_DEBUG) {
-    const skgeo = unplacedPool.filter((u) => u.cargoId === "sg3-35");
-    if (skgeo.length > 0) {
-      console.warn(`[ruleG-DEBUG] entry pool=${unplacedPool.length} sg3-35=${skgeo.length} bundles=${bundles.length}`);
-      for (const b of bundles) {
-        console.warn(`[ruleG-DEBUG] bundle cargoId=${b.cargoId} units=${b.units.length} faceIdx=${b.faceIdx} laneW=${b.laneWidth}`);
-      }
-    }
-  }
   // 큰 묶음부터 (unit 많은 것 우선)
   bundles.sort((a, b) => b.units.length - a.units.length);
   let triedCargos = 0;
