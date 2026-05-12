@@ -231,11 +231,6 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
           {hideShippers ? "👁 화주 다시 보기" : "🙈 화주 숨기기"}
         </button>
       </div>
-      {distInfo.distributedFields.size > 0 && (
-        <div className="rounded border-2 border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
-          <strong>⚠️ 자동 분배되었습니다</strong> — 같은 부킹 안 한 행에만 무게/CBM/ABOUT 값이 몰려있어 수량 비율로 자동 분배됨 ({distInfo.distributedFields.size}행 영향). 빨간 글씨로 표시된 셀이 분배된 값입니다.
-        </div>
-      )}
       <table className="w-full table-fixed text-xs">
         <colgroup>
           {colWidths.map((w, i) => (
@@ -295,7 +290,15 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                 <Fragment key={r.rowKey}>
                 <tr className="border-t border-neutral-200 align-middle leading-none">
                   <td className="px-0 py-0.5 text-center text-[11px] text-neutral-500">
-                    {idx + 1}
+                    <div>{idx + 1}</div>
+                    {distInfo.distributedFields.has(r.rowKey) && (
+                      <div
+                        className="cursor-help text-[9px] font-bold text-red-600 leading-none"
+                        title="같은 부킹 안 한 행에 몰린 값을 수량 비율로 자동 분배"
+                      >
+                        자동분배
+                      </div>
+                    )}
                   </td>
                   <td className="px-0 py-0.5">
                     <input
