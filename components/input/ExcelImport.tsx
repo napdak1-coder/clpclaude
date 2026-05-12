@@ -485,6 +485,12 @@ const SAMPLE_FILES: Array<{
     filename: "호치민 TOTAL 세번째.xlsx",
   },
   {
+    key: "hochiminh-total-4",
+    label: "4ST HM TOTAL",
+    url: "/samples/hochiminh-total-4.xlsx",
+    filename: "호치민 TOTAL 네번째.xlsx",
+  },
+  {
     key: "singapore-mangjak-total",
     label: "3ST 망작",
     url: "/samples/singapore-mangjak-total.xlsx",
