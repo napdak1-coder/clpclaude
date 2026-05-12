@@ -406,7 +406,12 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                         type="number"
                         min={0}
                         step={field === "quantity" ? 1 : "any"}
-                        value={r[field]}
+                        value={
+                          field === "weightPerUnitKg" &&
+                          isDistributed(r.rowKey, "weightPerUnit")
+                            ? Number((distributedValue(r.rowKey, "weightPerUnit") ?? 0).toFixed(2))
+                            : r[field]
+                        }
                         onChange={(e) => {
                           const num = Number(e.target.value);
                           updateRow(r.rowKey, {
@@ -416,7 +421,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                         title={
                           field === "weightPerUnitKg" &&
                           isDistributed(r.rowKey, "weightPerUnit")
-                            ? `자동 분배: ${(distributedValue(r.rowKey, "weightPerUnit") ?? 0).toFixed(0)}kg (같은 부킹 안 한 행에 몰린 무게를 수량 비율로 분배)`
+                            ? `자동 분배: ${(distributedValue(r.rowKey, "weightPerUnit") ?? 0).toFixed(2)}kg (같은 부킹 안 한 행에 몰린 무게를 수량 비율로 분배)`
                             : undefined
                         }
                         className={`block w-full min-w-0 rounded border px-0.5 py-0 text-right text-[11px] leading-tight ${
@@ -435,7 +440,11 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                         type="number"
                         step="any"
                         min={0}
-                        value={r.cbm ?? ""}
+                        value={
+                          isDistributed(r.rowKey, "cbm")
+                            ? Number((distributedValue(r.rowKey, "cbm") ?? 0).toFixed(3))
+                            : (r.cbm ?? "")
+                        }
                         placeholder="—"
                         onChange={(e) => {
                           const t = e.target.value;
@@ -481,7 +490,11 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                         type="number"
                         step="any"
                         min={0}
-                        value={r.aboutCbm ?? ""}
+                        value={
+                          isDistributed(r.rowKey, "aboutCbm")
+                            ? Number((distributedValue(r.rowKey, "aboutCbm") ?? 0).toFixed(3))
+                            : (r.aboutCbm ?? "")
+                        }
                         placeholder="—"
                         onChange={(e) => {
                           const t = e.target.value;
@@ -600,7 +613,13 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
           length: sizeModalRow?.lengthCm ?? 0,
           height: sizeModalRow?.heightCm ?? 0,
         }}
-        baseWeight={sizeModalRow?.weightPerUnitKg ?? 0}
+        baseWeight={
+          sizeModalRow
+            ? (isDistributed(sizeModalRow.rowKey, "weightPerUnit")
+                ? (distributedValue(sizeModalRow.rowKey, "weightPerUnit") ?? 0)
+                : sizeModalRow.weightPerUnitKg)
+            : 0
+        }
         baseCargoType={sizeModalRow?.cargoType}
         initial={sizeModalRow?.unitSizes}
         itemLabel={sizeModalRow?.itemName || undefined}

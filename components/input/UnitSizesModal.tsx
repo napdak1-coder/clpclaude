@@ -34,10 +34,13 @@ interface DraftRow extends UnitSize {
   weight: number;
 }
 
-function makeDraft(u: UnitSize): DraftRow {
+function makeDraft(u: UnitSize, fallbackWeight = 0): DraftRow {
+  // unit.weight 0/미지정 + fallbackWeight 있으면 폴백 적용 (행 단위 분배 무게 등)
+  const w =
+    typeof u.weight === "number" && u.weight > 0 ? u.weight : fallbackWeight;
   return {
     ...u,
-    weight: typeof u.weight === "number" ? u.weight : 0,
+    weight: w,
     rowKey: crypto.randomUUID(),
   };
 }
@@ -55,10 +58,12 @@ function unitWeightDefault(totalWeight: number, totalQty: number): number {
 
 function defaultDraft(base: UnitSizesModalProps): DraftRow[] {
   const perUnit = unitWeightDefault(base.baseWeight ?? 0, base.baseQuantity);
-  // 기존 unitSizes 가 있고 무게가 0이면 행의 단위중량 기본값으로 보강
+  // 기존 unitSizes 가 있고 무게가 0이면 행의 단위중량 기본값(분배된 baseWeight 또는 perUnit)으로 보강
   if (base.initial && base.initial.length > 0) {
     return base.initial.map((u) => {
-      const draft = makeDraft(u);
+      // baseWeight 직접 폴백 (분배된 단위당 무게 우선)
+      const draft = makeDraft(u, base.baseWeight ?? 0);
+      // 보조 — 그래도 0이면 perUnit (행 합 ÷ 수량) 폴백
       if ((!draft.weight || draft.weight <= 0) && perUnit > 0) {
         draft.weight = perUnit;
       }
