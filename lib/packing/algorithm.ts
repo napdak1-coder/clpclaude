@@ -20,6 +20,7 @@ import {
   type CargoSpec,
   type CargoType,
   type Remark,
+  type UnitSize,
 } from "../../types/cargo.ts";
 import type {
   ContainerSpec,
@@ -47,6 +48,7 @@ import { allowedFaces, effectiveSizeFace } from "./constraints.ts";
 import { computeDisplayRows } from "./display-rows.ts";
 import { strictStackAudit } from "./audit.ts";
 import { resetBruteForceBudget, clearBruteForceFailureCache } from "./extreme-point.ts";
+import { distributeBookingValues } from "../distribute-booking-values.ts";
 import {
   preClusterFootprint,
   type FootprintClusterOptions,
@@ -974,6 +976,61 @@ function repositionUnplaced(
  * 메인 진입점.
  * 점수 없이 결정적 룰로 한 번에 패킹.
  */
+/**
+ * 한 cargo 의 unitSizes 안에 cargoType 다른 박스가 섞여 있으면 cargoType 별로 cargo 분리.
+ * 예: cargo[PL, unitSizes={A:PL, B:PL, C:CT}] → cargo[PL,{A,B}] + cargo[CT,{C}]
+ *
+ * 분리 후 각 새 cargo 는:
+ *  - id 에 cargoType 소문자 suffix (예: 원본-pl, 원본-ct) — 추적용
+ *  - cargoType 갱신, unitSizes 그룹화 (각 unit.cargoType 은 비움)
+ *  - quantity = 그룹 박스 수 합
+ *  - cbm/aboutCbm = 원본 × 그룹 박스 수 / 전체 박스 수 (비율 분배)
+ *  - weightPerUnit = 그대로 (단위당 무게 비율 무관)
+ *
+ * unitSizes 가 비었거나 cargoType 모두 같으면 입력 그대로 통과 (회귀 X).
+ */
+export function splitCargoesByUnitCargoType(
+  cargoes: CargoSpec[],
+): CargoSpec[] {
+  const out: CargoSpec[] = [];
+  for (const cargo of cargoes) {
+    if (!cargo.unitSizes || cargo.unitSizes.length === 0) {
+      out.push(cargo);
+      continue;
+    }
+    // cargoType 별로 unitSizes 그룹화 (미지정은 cargo.cargoType 으로 폴백)
+    const groups = new Map<CargoType, UnitSize[]>();
+    for (const u of cargo.unitSizes) {
+      const t: CargoType = u.cargoType ?? cargo.cargoType;
+      const list = groups.get(t) ?? [];
+      list.push(u);
+      groups.set(t, list);
+    }
+    if (groups.size <= 1) {
+      // 모두 같은 cargoType — 분리 X, 그대로
+      out.push(cargo);
+      continue;
+    }
+    // 분리
+    const totalQty = cargo.unitSizes.reduce((s, u) => s + u.quantity, 0);
+    for (const [type, units] of groups) {
+      const subQty = units.reduce((s, u) => s + u.quantity, 0);
+      const ratio = totalQty > 0 ? subQty / totalQty : 0;
+      out.push({
+        ...cargo,
+        id: `${cargo.id}-${String(type).toLowerCase()}`,
+        cargoType: type,
+        unitSizes: units.map((u) => ({ ...u, cargoType: undefined })),
+        quantity: subQty,
+        cbm: cargo.cbm != null ? cargo.cbm * ratio : cargo.cbm,
+        aboutCbm:
+          cargo.aboutCbm != null ? cargo.aboutCbm * ratio : cargo.aboutCbm,
+      });
+    }
+  }
+  return out;
+}
+
 export function pack(
   cargoes: CargoSpec[],
   mode: ContainerMode,
@@ -981,6 +1038,12 @@ export function pack(
 ): CLPResult {
   // brute-force 호출 budget 카운터 리셋 (per pack-attempt)
   resetBruteForceBudget();
+
+  // unitSizes 안 cargoType 다른 박스 분리 (없으면 그대로)
+  cargoes = splitCargoesByUnitCargoType(cargoes);
+
+  // 같은 부킹 + 같은 화주 안에서 한 행만 무게/CBM/ABOUT 몰려있으면 수량 비율로 자동 분배
+  cargoes = distributeBookingValues(cargoes).cargoes;
 
   // 1) 분류
   const { visualCargoes, ctCargoes, completedCargoes } = classify(cargoes);

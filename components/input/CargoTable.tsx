@@ -9,9 +9,10 @@
  * - "사이즈" 버튼 : 수량 안에서 사이즈가 다른 단위가 섞여 있을 때 단위 사이즈 그룹을 입력하는 모달 호출
  */
 
-import { Fragment, useState } from "react";
-import type { CargoType, Orientation, Remark, UnitSize } from "@/types/cargo";
-import { CARGO_TYPES, calcSystemCbm } from "@/types/cargo";
+import { Fragment, useMemo, useState } from "react";
+import type { CargoSpec, CargoType, Orientation, Remark, UnitSize } from "@/types/cargo";
+import { CARGO_TYPES, calcSystemCbm, DEFAULT_REMARK } from "@/types/cargo";
+import { distributeBookingValues, type DistributedField } from "@/lib/distribute-booking-values";
 import { RemarksEditor } from "./RemarksEditor";
 import { UnitSizesModal } from "./UnitSizesModal";
 
@@ -100,6 +101,51 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
   const [sizeModalRowKey, setSizeModalRowKey] = useState<string | null>(null);
   const [hideShippers, setHideShippers] = useState(false);
   const sizeModalRow = rows.find((r) => r.rowKey === sizeModalRowKey) ?? null;
+
+  // 부킹 단위 자동 분배 정보 — 같은 booking + 같은 화주 안에서 한 행에만 무게/CBM 몰려있으면
+  // 수량 비율 분배. 분배된 필드 + 분배값을 별도로 보관해 화면에 빨간 글씨로 표시.
+  const distInfo = useMemo(() => {
+    const cargoes: CargoSpec[] = rows.map((r) => ({
+      id: r.rowKey,
+      shipmentId: "",
+      sortOrder: r.sortOrder ?? 0,
+      cargoType: r.cargoType,
+      bookingNo: r.bookingNo,
+      actualShipperName: r.actualShipperName,
+      width: r.widthCm,
+      length: r.lengthCm,
+      height: r.heightCm,
+      quantity: r.quantity,
+      weightPerUnit: r.weightPerUnitKg,
+      cbm: r.cbm ?? undefined,
+      aboutCbm: r.aboutCbm ?? undefined,
+      remarks: DEFAULT_REMARK,
+    }));
+    const result = distributeBookingValues(cargoes);
+    const distributedValues = new Map<
+      string,
+      { cbm?: number; aboutCbm?: number; weightPerUnit?: number }
+    >();
+    for (const c of result.cargoes) {
+      const fields = result.distributedFields.get(c.id);
+      if (!fields || fields.size === 0) continue;
+      const v: { cbm?: number; aboutCbm?: number; weightPerUnit?: number } = {};
+      if (fields.has("cbm")) v.cbm = c.cbm;
+      if (fields.has("aboutCbm")) v.aboutCbm = c.aboutCbm;
+      if (fields.has("weightPerUnit")) v.weightPerUnit = c.weightPerUnit;
+      distributedValues.set(c.id, v);
+    }
+    return { distributedFields: result.distributedFields, distributedValues };
+  }, [rows]);
+
+  const isDistributed = (rowKey: string, field: DistributedField): boolean => {
+    return distInfo.distributedFields.get(rowKey)?.has(field) ?? false;
+  };
+  const distributedValue = (rowKey: string, field: DistributedField): number | undefined => {
+    const v = distInfo.distributedValues.get(rowKey);
+    if (!v) return undefined;
+    return v[field];
+  };
 
   const updateRow = (rowKey: string, patch: Partial<CargoRow>) => {
     onChange(
@@ -362,7 +408,18 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                             [field]: Number.isFinite(num) ? num : 0,
                           } as Partial<CargoRow>);
                         }}
-                        className="block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 text-right text-[11px] leading-tight"
+                        title={
+                          field === "weightPerUnitKg" &&
+                          isDistributed(r.rowKey, "weightPerUnit")
+                            ? `자동 분배: ${(distributedValue(r.rowKey, "weightPerUnit") ?? 0).toFixed(0)}kg (같은 부킹 안 한 행에 몰린 무게를 수량 비율로 분배)`
+                            : undefined
+                        }
+                        className={`block w-full min-w-0 rounded border px-0.5 py-0 text-right text-[11px] leading-tight ${
+                          field === "weightPerUnitKg" &&
+                          isDistributed(r.rowKey, "weightPerUnit")
+                            ? "border-red-400 bg-red-50 font-bold text-red-600"
+                            : "border-neutral-300"
+                        }`}
                       />
                     </td>
                   ))}
@@ -387,12 +444,21 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                           });
                         }}
                         className={`block w-full min-w-0 rounded border px-0.5 py-0 text-right text-[11px] leading-tight ${
-                          r.cbm == null
+                          isDistributed(r.rowKey, "cbm")
+                            ? "border-red-400 bg-red-50"
+                            : r.cbm == null
                             ? "border-amber-400 bg-amber-50"
                             : "border-neutral-300"
                         }`}
                       />
-                      {r.cbm == null && (
+                      {isDistributed(r.rowKey, "cbm") ? (
+                        <span
+                          className="cursor-help text-[10px] font-bold text-red-600"
+                          title="같은 부킹 안 한 행에만 값이 몰려있어 수량 비율로 자동 분배됨"
+                        >
+                          →{(distributedValue(r.rowKey, "cbm") ?? 0).toFixed(2)}
+                        </span>
+                      ) : r.cbm == null ? (
                         <span
                           className="cursor-help text-[11px] text-amber-600"
                           title="엑셀 CFS CBM 비어있음 — ABOUT 또는 시스템 CBM 사용. 직접 입력 가능."
@@ -400,30 +466,44 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                         >
                           ⚠
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </td>
                   {/* ABOUT — 엑셀 ABOUT 셀에서 파싱한 값 (CFS CBM 폴백) */}
                   <td className="px-0 py-0.5">
-                    <input
-                      type="number"
-                      step="any"
-                      min={0}
-                      value={r.aboutCbm ?? ""}
-                      placeholder="—"
-                      onChange={(e) => {
-                        const t = e.target.value;
-                        if (t === "") {
-                          updateRow(r.rowKey, { aboutCbm: null });
-                          return;
-                        }
-                        const num = Number(t);
-                        updateRow(r.rowKey, {
-                          aboutCbm: Number.isFinite(num) ? num : null,
-                        });
-                      }}
-                      className="block w-full min-w-0 rounded border border-neutral-300 px-0.5 py-0 text-right text-[11px] leading-tight"
-                    />
+                    <div className="flex items-center gap-0.5">
+                      <input
+                        type="number"
+                        step="any"
+                        min={0}
+                        value={r.aboutCbm ?? ""}
+                        placeholder="—"
+                        onChange={(e) => {
+                          const t = e.target.value;
+                          if (t === "") {
+                            updateRow(r.rowKey, { aboutCbm: null });
+                            return;
+                          }
+                          const num = Number(t);
+                          updateRow(r.rowKey, {
+                            aboutCbm: Number.isFinite(num) ? num : null,
+                          });
+                        }}
+                        className={`block w-full min-w-0 rounded border px-0.5 py-0 text-right text-[11px] leading-tight ${
+                          isDistributed(r.rowKey, "aboutCbm")
+                            ? "border-red-400 bg-red-50"
+                            : "border-neutral-300"
+                        }`}
+                      />
+                      {isDistributed(r.rowKey, "aboutCbm") && (
+                        <span
+                          className="cursor-help text-[10px] font-bold text-red-600"
+                          title="같은 부킹 안 한 행에만 값이 몰려있어 수량 비율로 자동 분배됨"
+                        >
+                          →{(distributedValue(r.rowKey, "aboutCbm") ?? 0).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   {/* 시스템 CBM — 읽기 전용 표시. 기준 CBM 과 0.01 초과 차이면 빨간색 강조 */}
                   <td
@@ -516,6 +596,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
           height: sizeModalRow?.heightCm ?? 0,
         }}
         baseWeight={sizeModalRow?.weightPerUnitKg ?? 0}
+        baseCargoType={sizeModalRow?.cargoType}
         initial={sizeModalRow?.unitSizes}
         itemLabel={sizeModalRow?.itemName || undefined}
         onClose={() => setSizeModalRowKey(null)}

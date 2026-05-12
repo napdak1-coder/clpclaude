@@ -67,6 +67,13 @@ export interface UnitSize {
   quantity: number;              // 이 사이즈에 해당하는 단위 개수
   /** 그룹의 단위당 중량 (kg). 미입력이면 0 — 알고리즘에는 행 단위 weightPerUnit 가 우선 사용 */
   weight?: number;
+  /**
+   * 박스별 화물 종류 (선택). 미지정이면 cargo.cargoType 사용.
+   * 같은 cargo 안에서 박스마다 다른 종류 (예: PL 2개 + CT 1개) 표현 가능.
+   * 알고리즘은 `splitCargoesByUnitCargoType` 으로 cargoType 별로 cargo 를 분리해
+   * PL 박스는 시각 적재, CT 박스는 잔여 CBM 으로 자동 분류.
+   */
+  cargoType?: CargoType;
 }
 
 export interface CargoSpec {

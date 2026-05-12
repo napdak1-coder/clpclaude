@@ -11,7 +11,8 @@
  */
 
 import { useEffect, useState } from "react";
-import type { UnitSize } from "@/types/cargo";
+import type { UnitSize, CargoType } from "@/types/cargo";
+import { CARGO_TYPES } from "@/types/cargo";
 
 interface UnitSizesModalProps {
   open: boolean;
@@ -20,6 +21,8 @@ interface UnitSizesModalProps {
   baseSize: { width: number; length: number; height: number };
   /** 행의 단위 중량 (kg/개) — 새 그룹 추가 / 초기 행 채울 때 기본값으로 사용 */
   baseWeight?: number;
+  /** 행의 기본 화물 종류 (PL/CT 등) — 사이즈 그룹마다 다른 화종 미지정 시 이 값 사용. 사용자가 다르게 선택하면 그 값으로 덮어씀. */
+  baseCargoType?: CargoType;
   initial?: UnitSize[];
   itemLabel?: string;
   onClose: () => void;
@@ -96,7 +99,7 @@ function unitWeightTotal(u: { weight: number; quantity: number }): number {
 }
 
 export function UnitSizesModal(props: UnitSizesModalProps) {
-  const { open, baseQuantity, baseWeight, onClose, onSave, itemLabel } = props;
+  const { open, baseQuantity, baseWeight, baseCargoType, onClose, onSave, itemLabel } = props;
   const [drafts, setDrafts] = useState<DraftRow[]>(() => defaultDraft(props));
 
   // 모달이 열릴 때마다 초기값을 다시 적용 (서로 다른 행을 편집해도 맞물림)
@@ -190,6 +193,7 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
                 <th className="px-1 py-1 text-right">높이(cm)</th>
                 <th className="px-1 py-1 text-right">수량</th>
                 <th className="px-1 py-1 text-right">단위중량(kg)</th>
+                <th className="px-1 py-1 text-right">화종</th>
                 <th className="px-1 py-1 text-right">CBM</th>
                 <th className="px-1 py-1 text-right">총 무게(kg)</th>
                 <th className="px-1 py-1"></th>
@@ -215,6 +219,28 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
                       />
                     </td>
                   ))}
+                  <td className="px-1 py-1 text-right">
+                    <select
+                      value={d.cargoType ?? baseCargoType ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        // 행 기본 화종과 같은 값이면 undefined 저장 (중복 보존 안 함)
+                        const next =
+                          v === "" || v === baseCargoType
+                            ? undefined
+                            : (v as CargoType);
+                        updateRow(d.rowKey, { cargoType: next });
+                      }}
+                      className="w-20 rounded border border-neutral-300 px-1 py-0.5 text-right"
+                      title="박스별 화물 종류 (행 기본값과 다를 때만 저장)"
+                    >
+                      {CARGO_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="px-1 py-1 text-right text-neutral-700">
                     {unitCbm(d).toFixed(4)}
                   </td>
