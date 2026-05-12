@@ -165,11 +165,12 @@ function groupFootprintColumns(units: UnitItem[]): ColumnDescriptor[] {
   return columns;
 }
 
-/** stack 가능성 체크 — heavierBelow / noStacking 룰 (extreme-point canStackOn 와 동일) */
+/** stack 가능성 체크 — heavierBelow / noStacking / selfStackOnly 룰 (extreme-point canStackOn 와 동일) */
 function canStackPair(top: UnitItem, bottom: UnitItem): boolean {
   return canStackOn(
     { weightPerUnit: top.weight, remarks: top.remarks },
     { weightPerUnit: bottom.weight, remarks: bottom.remarks },
+    { topBookingNo: top.bookingNo, bottomBookingNo: bottom.bookingNo },
   );
 }
 
@@ -301,11 +302,12 @@ function tryAbsorbOnColumns(
       const ratio =
         (u.width * u.length) / (supW * supL);
       if (ratio < SUPPORT_RATIO_MIN) continue;
-      // canStackOn 검증
+      // canStackOn 검증 (selfStackOnly 포함)
       if (
         !canStackOn(
           { weightPerUnit: u.weight, remarks: u.remarks },
           { weightPerUnit: p.weight, remarks: p.remarks },
+          { topBookingNo: u.bookingNo, bottomBookingNo: p.bookingNo },
         )
       )
         continue;

@@ -346,6 +346,7 @@ function buildImportPayload(
       if (flags.noStacking) base.noStacking = true;
       if (flags.topOnly) base.topOnly = true;
       if (flags.heavierBelow) base.heavierBelow = true;
+      if (flags.selfStackOnly) base.selfStackOnly = true;
       if (flags.orientation) base.orientation = flags.orientation;
     }
 

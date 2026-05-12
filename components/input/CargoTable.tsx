@@ -52,6 +52,8 @@ export interface CargoRow {
   topOnly: boolean;
   orientation: Orientation;
   heavierBelow: boolean;
+  /** 자체다단 — 같은 booking 안에서만 적층 허용. 다른 booking 위/아래 적층 X */
+  selfStackOnly?: boolean;
   itemRemark: string;
 }
 
@@ -163,6 +165,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
       topOnly: remark.topOnly,
       orientation: remark.orientation,
       heavierBelow: remark.heavierBelow,
+      selfStackOnly: remark.selfStackOnly ?? false,
     });
 
   // 20컬럼: # / HBL / DEST / 부킹 / 품목 / 실화주 / 화주 / 구분 / 가로 / 세로 / 높이 / 수량 / 중량 / CFS / ABOUT / 시스템 / 사이즈 / 리마크 / 메모 / 삭제
@@ -278,6 +281,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                 topOnly: r.topOnly,
                 orientation: r.orientation,
                 heavierBelow: r.heavierBelow,
+                selfStackOnly: r.selfStackOnly,
               };
               const sysCbm = rowSystemCbm(r);
               const hasUnitSizes = !!r.unitSizes && r.unitSizes.length > 0;

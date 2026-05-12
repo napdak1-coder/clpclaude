@@ -51,6 +51,11 @@ export interface Remark {
   orientation: Orientation;
   /** 중량 조건: 아래 화물이 위 화물보다 무거워야 함 */
   heavierBelow: boolean;
+  /**
+   * 자체다단: 같은 booking 안에서만 적층 허용. 다른 booking 위/아래 적층 금지.
+   * 위/아래 어느 쪽이라도 selfStackOnly + booking 다르면 거부.
+   */
+  selfStackOnly?: boolean;
   /** 자유 메모 */
   notes?: string;
 }

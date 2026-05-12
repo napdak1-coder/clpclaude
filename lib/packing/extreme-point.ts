@@ -396,7 +396,10 @@ export function tryPlaceUnit(
           continue;
         let stackOk = true;
         for (const s of supporters) {
-          if (!canStackOn(asCargoLikeForFace(unit), asCargoLikeForStack(s))) {
+          if (!canStackOn(asCargoLikeForFace(unit), asCargoLikeForStack(s), {
+            topBookingNo: unit.bookingNo,
+            bottomBookingNo: s.bookingNo,
+          })) {
             stackOk = false;
             break;
           }
@@ -692,7 +695,10 @@ export function tryPlaceUnitBruteForce(
               continue;
             let stackOk = true;
             for (const s of sups) {
-              if (!canStackOn(cargoLike, asCargoLikeForStack(s))) {
+              if (!canStackOn(cargoLike, asCargoLikeForStack(s), {
+                topBookingNo: unit.bookingNo,
+                bottomBookingNo: s.bookingNo,
+              })) {
                 stackOk = false;
                 break;
               }

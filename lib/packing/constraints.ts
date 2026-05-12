@@ -131,8 +131,25 @@ export const STACK_WEIGHT_TOLERANCE = 1.0;
 export function canStackOn(
   top: Pick<CargoSpec, "weightPerUnit" | "remarks">,
   bottom: Pick<CargoSpec, "weightPerUnit" | "remarks">,
+  options?: {
+    /** 적층 booking 비교용. selfStackOnly 룰 검사 시 둘 다 전달 필수. */
+    topBookingNo?: string;
+    bottomBookingNo?: string;
+  },
 ): boolean {
   if (bottom.remarks.noStacking) return false;
+
+  // 자체다단 룰 — 위/아래 어느 쪽이라도 selfStackOnly + booking 다르면 거부.
+  // booking 정보 없으면 (옵션 미전달) 안전 모드: selfStackOnly 활성 시 거부.
+  const needsSelfStack =
+    top.remarks.selfStackOnly === true ||
+    bottom.remarks.selfStackOnly === true;
+  if (needsSelfStack) {
+    const tb = options?.topBookingNo;
+    const bb = options?.bottomBookingNo;
+    if (!tb || !bb || tb !== bb) return false;
+  }
+
   const bothWeightsKnown = top.weightPerUnit > 0 && bottom.weightPerUnit > 0;
   if (bothWeightsKnown) {
     // 글로벌 룰 — 위 무게가 아래 무게 × 허용비율 보다 무거우면 불가

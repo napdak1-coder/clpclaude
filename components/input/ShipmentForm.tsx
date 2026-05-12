@@ -254,6 +254,7 @@ export function ShipmentForm({
         topOnly: r.topOnly,
         orientation: r.orientation,
         heavierBelow: r.heavierBelow,
+        selfStackOnly: r.selfStackOnly ?? false,
         itemRemark: toNullableText(r.itemRemark),
       })),
     };

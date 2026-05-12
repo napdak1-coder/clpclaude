@@ -26,6 +26,7 @@ export type CargoFieldKey =
   | "topOnly"
   | "orientation"
   | "heavierBelow"
+  | "selfStackOnly"
   | "itemRemark";
 
 /** 부킹(shipment-level) 필드 — 한 부킹에 공통이라 보통 첫 행 값을 채택 */
@@ -102,6 +103,7 @@ export const CARGO_FIELDS: CargoFieldKey[] = [
   "topOnly",
   "orientation",
   "heavierBelow",
+  "selfStackOnly",
   "itemRemark",
 ];
 
@@ -135,6 +137,7 @@ export const FIELD_LABELS: Record<FieldKey, string> = {
   topOnly: "상단적재",
   orientation: "방향제한",
   heavierBelow: "중량조건",
+  selfStackOnly: "자체다단",
   itemRemark: "메모(화물) — REMARK 등",
 };
 
@@ -256,6 +259,7 @@ export interface ExtractedFlags {
   noStacking?: boolean;
   topOnly?: boolean;
   heavierBelow?: boolean;
+  selfStackOnly?: boolean;
   /** "free" 는 명시 안 함 — 키가 있을 때만 적용 */
   orientation?: "long_along_length" | "fixed";
 }
@@ -284,6 +288,11 @@ export function extractFlagsAndStrip(text: string): {
   if (/중량\s*조건/.test(out)) {
     flags.heavierBelow = true;
     out = out.replace(/\*?\s*중량\s*조건\s*\*?/g, " ");
+  }
+  // 자체다단 — 같은 booking 안에서만 적층 허용
+  if (/자체\s*다단/.test(out)) {
+    flags.selfStackOnly = true;
+    out = out.replace(/\*?\s*자체\s*다단\s*\*?/g, " ");
   }
   // 장축(길이|방향|길이방향) 제한
   if (/장축[\s가-힣]{0,8}(?:길이|방향|제한)/.test(out)) {
@@ -533,6 +542,7 @@ const KEYWORDS: Record<FieldKey, string[]> = {
   topOnly: ["상단적재", "상단", "top only", "toponly"],
   orientation: ["방향", "orientation"],
   heavierBelow: ["중량조건", "heavier below", "heavier"],
+  selfStackOnly: ["자체다단", "self stack", "selfstack", "same booking only"],
   // itemRemark = 화물별 메모. 사용자 양식의 "REMARK" 컬럼은 사이즈 텍스트("112X145X165") 가 들어가므로 여기로 매핑.
   itemRemark: ["메모", "비고", "note", "item remark", "remark"],
 };

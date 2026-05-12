@@ -64,6 +64,15 @@ export function RemarksEditor({ value, onChange, compact }: RemarksEditorProps) 
             />
             <span>{lbl("중량조건", "중조")}</span>
           </label>
+          <label className={labelCls} title="자체다단 — 같은 부킹 안에서만 적층 허용. 다른 부킹과 적층 금지">
+            <input
+              type="checkbox"
+              checked={value.selfStackOnly ?? false}
+              onChange={(e) => update({ selfStackOnly: e.target.checked })}
+              className={cbCls}
+            />
+            <span>{lbl("자체다단", "자다")}</span>
+          </label>
         </div>
         <div>
           <select
