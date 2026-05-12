@@ -182,6 +182,178 @@ describe("long-axis-anchor: 거부 케이스", () => {
   });
 });
 
+describe("long-axis-anchor: row-lane bundle (2026-05-12 추가)", () => {
+  it("FLOWBUS 326×116×110 ×2 → row-lane 묶음 성공 (z=0 한 row, 폭 116+116=232 ≤ 234)", () => {
+    const cont = {
+      index: 1,
+      spec: SPEC_40FT,
+      packState: makeContainerState(),
+    };
+    const units = [
+      mkUnit({
+        unitId: "flw-0",
+        cargoId: "flowbus",
+        width: 326,
+        length: 116,
+        height: 110,
+        weight: 800,
+      }),
+      mkUnit({
+        unitId: "flw-1",
+        cargoId: "flowbus",
+        width: 326,
+        length: 116,
+        height: 110,
+        weight: 800,
+      }),
+    ];
+    const placed = anchorLongAxisCargoes(cont, units);
+    assert.equal(placed.size, 2, "두 박스 모두 anchor 되어야 함");
+    assert.equal(cont.packState.placements.length, 2);
+    // 모두 z=0 (한 row, 적층 X)
+    for (const p of cont.packState.placements) {
+      assert.equal(p.position.z, 0, `z=0 평면이어야 (실제: ${p.position.z})`);
+    }
+    // 모두 동일 y (한 row 라인)
+    const ys = cont.packState.placements.map((p) => p.position.y);
+    assert.equal(ys[0], ys[1], "두 박스 y 좌표 동일해야 (한 row)");
+    // length 축에 326 정렬
+    for (const p of cont.packState.placements) {
+      assert.equal(p.size.length, 326, "가장 긴 변 326 이 length 축에 정렬");
+    }
+    // x 좌표가 폭만큼 차이
+    const xs = cont.packState.placements.map((p) => p.position.x).sort((a, b) => a - b);
+    assert.equal(xs[0], 0, "첫 박스 x=0");
+    assert.equal(xs[1], 116, "두 번째 박스 x=116 (폭 옆)");
+  });
+
+  it("큐브형 200×200×200 ×2 → row-lane 안 발동 (slenderness 1.0 > 0.40)", () => {
+    const cont = {
+      index: 1,
+      spec: SPEC_40FT,
+      packState: makeContainerState(),
+    };
+    const units = [
+      mkUnit({
+        unitId: "cube-0",
+        cargoId: "cube",
+        width: 200,
+        length: 200,
+        height: 200,
+        weight: 500,
+      }),
+      mkUnit({
+        unitId: "cube-1",
+        cargoId: "cube",
+        width: 200,
+        length: 200,
+        height: 200,
+        weight: 500,
+      }),
+    ];
+    // findLongAxisCargoes 단계에서 슬렌더니스 1.0 으로 거부 → anchor 0
+    const placed = anchorLongAxisCargoes(cont, units);
+    assert.equal(placed.size, 0, "큐브형은 row-lane 안 발동");
+    assert.equal(cont.packState.placements.length, 0);
+  });
+
+  it("단일 unit (qty=1) → row-lane 안 발동 (기존 단행 anchor 진입)", () => {
+    const cont = {
+      index: 1,
+      spec: SPEC_40FT,
+      packState: makeContainerState(),
+    };
+    const units = [
+      mkUnit({
+        unitId: "solo-0",
+        cargoId: "solo",
+        width: 326,
+        length: 116,
+        height: 110,
+        weight: 800,
+      }),
+    ];
+    const placed = anchorLongAxisCargoes(cont, units);
+    // 단행 = row-lane 거부 (≥2 조건), 기존 단행 anchor 로 처리
+    assert.equal(placed.size, 1, "단일은 기존 단행 anchor 로 처리");
+    assert.equal(cont.packState.placements.length, 1);
+    const p = cont.packState.placements[0];
+    assert.equal(p.size.length, 326);
+    assert.equal(p.position.z, 0);
+  });
+
+  it("적층 가능 + 길이 짧음 (150cm 컨 길이 25% 미만 + noStacking=false) → row-lane 안 발동", () => {
+    // 길이 150 < 1200 × 0.25 = 300 AND 적층 가능 → row-lane 거부
+    // findLongAxisCargoes 도 절대 길이 임계(300) 못 넘어 통과 X
+    const cont = {
+      index: 1,
+      spec: SPEC_40FT,
+      packState: makeContainerState(),
+    };
+    const units = [
+      mkUnit({
+        unitId: "short-0",
+        cargoId: "short",
+        width: 150,
+        length: 50,
+        height: 50,
+        weight: 100,
+      }),
+      mkUnit({
+        unitId: "short-1",
+        cargoId: "short",
+        width: 150,
+        length: 50,
+        height: 50,
+        weight: 100,
+      }),
+    ];
+    const placed = anchorLongAxisCargoes(cont, units);
+    assert.equal(placed.size, 0, "짧은 박스는 long-axis 자체 비활성");
+  });
+
+  it("FLOWBUS ×3 → 116×3=348 > 234 → row-lane 거부 → 단일 cursor anchor 로 폴백", () => {
+    const cont = {
+      index: 1,
+      spec: SPEC_40FT,
+      packState: makeContainerState(),
+    };
+    const units = [
+      mkUnit({ unitId: "f0", cargoId: "fl3", width: 326, length: 116, height: 110, weight: 800 }),
+      mkUnit({ unitId: "f1", cargoId: "fl3", width: 326, length: 116, height: 110, weight: 800 }),
+      mkUnit({ unitId: "f2", cargoId: "fl3", width: 326, length: 116, height: 110, weight: 800 }),
+    ];
+    const placed = anchorLongAxisCargoes(cont, units);
+    // row-lane 은 거부 (3×116=348 > 234), 기존 cursor anchor 가 처리 (가능한 만큼 한 줄 + 줄바꿈)
+    // 모두 들어가는 게 보장되진 않지만, 최소한 충돌·CBM 쪼개기 없이 통째로 배치 또는 0.
+    // 통째 commit 룰이라 일부만 들어가지는 않음.
+    assert.ok(
+      placed.size === 0 || placed.size === 3,
+      `통째로 0 또는 전부 (실제: ${placed.size})`,
+    );
+  });
+});
+
+describe("long-axis-anchor: SLENDERNESS_THRESHOLD 0.40", () => {
+  it("FLOWBUS 비율 110/326 = 0.337 → 통과", () => {
+    const u = mkUnit({ unitId: "u1", cargoId: "c1", width: 326, length: 116, height: 110 });
+    const r = __testables.maxSlendernessRatioOf([u]);
+    assert.ok(r <= __testables.SLENDERNESS_THRESHOLD, `${r} ≤ ${__testables.SLENDERNESS_THRESHOLD}`);
+  });
+
+  it("VPHI 비율 71/114 = 0.62 → 탈락 (큐브형 보호)", () => {
+    const u = mkUnit({ unitId: "u1", cargoId: "c1", width: 114, length: 114, height: 71 });
+    const r = __testables.maxSlendernessRatioOf([u]);
+    assert.ok(r > __testables.SLENDERNESS_THRESHOLD, `${r} > ${__testables.SLENDERNESS_THRESHOLD}`);
+  });
+
+  it("311 막대 비율 15/311 = 0.048 → 통과 (기존 동작 유지)", () => {
+    const u = mkUnit({ unitId: "u1", cargoId: "c1", width: 311, length: 15, height: 15 });
+    const r = __testables.maxSlendernessRatioOf([u]);
+    assert.ok(r <= __testables.SLENDERNESS_THRESHOLD);
+  });
+});
+
 describe("long-axis-anchor: __testables.pickLongAlongLengthFace", () => {
   it("311×15×15 → length 축에 311 정렬되는 face 선택", () => {
     const u = mkUnit({ unitId: "u1", cargoId: "c1", width: 311, length: 15, height: 15 });

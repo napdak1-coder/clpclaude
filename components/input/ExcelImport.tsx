@@ -19,6 +19,7 @@ import {
   BOOKING_FIELDS,
   CARGO_FIELDS,
   FIELD_LABELS,
+  correctInflatedUnitWeights,
   displayHeader,
   extractFlagsAndStrip,
   mapHeadersToFields,
@@ -400,7 +401,7 @@ function buildImportPayload(
         0,
       );
       const finalQty = base.quantity > 0 ? base.quantity : sumCounts;
-      const unitSizes = sumCounts === finalQty
+      const rawUnitSizes = sumCounts === finalQty
         ? dims.map((d) => ({
             width: d.width,
             length: d.length,
@@ -408,6 +409,14 @@ function buildImportPayload(
             quantity: d.count && d.count > 0 ? d.count : 1,
             weight: 0,
           }))
+        : undefined;
+      // 부풀려진 weight 자동 보정 — 모든 unitSize.weight 가 행 총중량과 같으면
+      // 박스1개 무게로 나눠 채움. weight=0 (방금 채운 경우) 은 그대로.
+      const unitSizes = rawUnitSizes
+        ? correctInflatedUnitWeights(
+            { quantity: finalQty, weightPerUnitKg: base.weightPerUnitKg },
+            rawUnitSizes,
+          ) ?? rawUnitSizes
         : undefined;
       const target: CargoRow = {
         ...base,

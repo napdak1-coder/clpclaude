@@ -197,10 +197,10 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
                 <th className="px-1 py-1 text-right">세로(cm)</th>
                 <th className="px-1 py-1 text-right">높이(cm)</th>
                 <th className="px-1 py-1 text-right">수량</th>
-                <th className="px-1 py-1 text-right">단위중량(kg)</th>
+                <th className="px-1 py-1 text-right">박스 1개 무게 (kg)</th>
                 <th className="px-1 py-1 text-right">화종</th>
                 <th className="px-1 py-1 text-right">CBM</th>
-                <th className="px-1 py-1 text-right">총 무게(kg)</th>
+                <th className="px-1 py-1 text-right">그룹 총 무게 (kg)</th>
                 <th className="px-1 py-1"></th>
               </tr>
             </thead>
@@ -300,7 +300,7 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
               )}
               {baseWeight && baseWeight > 0 && (
                 <>
-                  &nbsp;/&nbsp;엑셀 중량 <b className="text-neutral-900">{baseWeight.toFixed(1)}</b> kg
+                  &nbsp;/&nbsp;엑셀 총 중량 <b className="text-neutral-900">{baseWeight.toFixed(1)}</b> kg
                   {weightMismatch ? (
                     <span className="ml-1 text-red-600">⚠ 불일치 (Δ {Math.abs(totalWeight - baseWeight).toFixed(1)})</span>
                   ) : (

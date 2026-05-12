@@ -51,6 +51,8 @@ import { resetBruteForceBudget, clearBruteForceFailureCache } from "./extreme-po
 import { distributeBookingValues } from "../distribute-booking-values.ts";
 import {
   preClusterFootprint,
+  preClusterNearFootprint,
+  preClusterRowLane,
   type FootprintClusterOptions,
 } from "./footprint-cluster.ts";
 import {
@@ -747,6 +749,77 @@ function tryBundleStack(
       break;
     }
   }
+
+  // **Row 같은 평면 옆 컬럼 적층 (2026-05-12 추가)** — 첫 컬럼이 plannedStack 만큼 다 찼고
+  // group 에 같은 cargoId + 같은 사이즈 unit 이 더 남았으면, 같은 row (y=첫 컬럼 y, z=0) 의
+  // 옆 칸 (x = 첫 컬럼 x + 폭) 에 두 번째 컬럼 적층 시도.
+  // 활성 조건: noStacking=false (이미 위에서 검사됨), 같은 사이즈 (allUnitsSameSize 보장).
+  // VPHI 같은 케이스에서 같은 row 두 컬럼 옆에 적층하는 사용자 답안 패턴 재현.
+  // 보수적: 같은 cargoId 안에서만, 한 row 안에서만 시도 (다른 row 줄바꿈은 기존 polish 단계에 위임).
+  if (placed.length >= plannedStack && placed.length < group.length && chosenFace !== null) {
+    // 첫 컬럼 baseline (placed[0]) 의 위치
+    const baseFirst = host.packState.placements.find(
+      (p) => p.unitId === placed[0].unitId,
+    );
+    if (baseFirst) {
+      const colWidth = baseFirst.size.width;
+      const colY = baseFirst.position.y;
+      const colZ0 = 0;
+      let nextColX = baseFirst.position.x + colWidth;
+      // 컨 폭 안에 다음 컬럼 들어가나?
+      while (
+        placed.length < group.length &&
+        nextColX + colWidth <= host.spec.innerWidth + STACK_EPS
+      ) {
+        // 이 컬럼 base 자리 후보 — 같은 (nextColX, colY, z=0) 강제
+        const colBaseScore = (cand: { x: number; y: number; z: number }): number => {
+          const exact =
+            Math.abs(cand.x - nextColX) < STACK_EPS &&
+            Math.abs(cand.y - colY) < STACK_EPS &&
+            Math.abs(cand.z - colZ0) < STACK_EPS;
+          return exact ? 0 : Number.POSITIVE_INFINITY;
+        };
+        const baseUnit = group[placed.length];
+        if (
+          !tryPlaceUnit(baseUnit, host.packState, host.spec, {
+            scoreFn: colBaseScore,
+            forceFaceIdx: chosenFace,
+          })
+        ) {
+          break; // 다음 컬럼 base 못 박음 → 종료
+        }
+        let colAnchor = host.packState.placements[host.packState.placements.length - 1];
+        placed.push(baseUnit);
+        // 이 컬럼 위로 plannedStack-1 개 더 적층 시도
+        for (let j = 1; j < plannedStack && placed.length < group.length; j++) {
+          const u = group[placed.length];
+          const tx = colAnchor.position.x;
+          const ty = colAnchor.position.y;
+          const tz = colAnchor.position.z + colAnchor.size.height;
+          const stackScore = (cand: { x: number; y: number; z: number }): number => {
+            const exact =
+              Math.abs(cand.x - tx) < STACK_EPS &&
+              Math.abs(cand.y - ty) < STACK_EPS &&
+              Math.abs(cand.z - tz) < STACK_EPS;
+            return exact ? 0 : Number.POSITIVE_INFINITY;
+          };
+          if (
+            tryPlaceUnit(u, host.packState, host.spec, {
+              scoreFn: stackScore,
+              forceFaceIdx: chosenFace,
+            })
+          ) {
+            colAnchor = host.packState.placements[host.packState.placements.length - 1];
+            placed.push(u);
+          } else {
+            break;
+          }
+        }
+        nextColX += colWidth;
+      }
+    }
+  }
+
   const placedIds = new Set(placed.map((p) => p.unitId));
   return {
     placed,
@@ -1773,6 +1846,175 @@ export function pack(
       mode_placement === "pure" ? placeQueuePure : placeQueueWrapper;
     placeQueue(generalUnits.filter((u) => !placedByPreCluster.has(u.unitId)));
     placeQueue(topOnlyUnits.filter((u) => !placedByPreCluster.has(u.unitId)));
+  }
+
+  // 5.44) **룰 G — Row-lane 묶음 (preClusterRowLane)** — wrapper 전용 fallback (룰 F 직전)
+  //
+  // 같은 cargoId 의 박스가 noStacking=true 라서 위로 못 쌓을 때, 두 컬럼을 폭 방향 옆으로
+  // 깔고 각 컬럼 안에서 박스를 길이(y) 방향으로 직렬 배치. 모든 박스 z=0 강제.
+  // pickLaneFace 가 eff.width 작은 면을 골라 두 컬럼 폭 합 ≤ 컨 안쪽 폭 보장.
+  //
+  // 사례: SK GEO CENTRIC (FBSIN260431) sg3-35 — 137×115×85 ×1 + 135×115×129 ×2 noStacking=true.
+  //   face 1(L×W) 회전 → 폭 115, 두 컬럼 230 ≤ 234. 첫 컬럼 137 ×1, 둘째 컬럼 135+135 직렬.
+  //
+  // 활성 조건 10개 모두 검증 (footprint-cluster.ts 룰 G 섹션 참조). 회귀 위험 없음 — 룰 F 보다
+  // 먼저 시도하되 cargoId atomic 보호 (실패 시 전체 롤백) 로 다른 단계 영향 없음.
+  if (
+    unplaced.length > 0 &&
+    mode_placement === "wrapper" &&
+    options?.footprintCluster?.enabled !== false
+  ) {
+    // 미배치 cargoId 별 unit 모음
+    const unplacedByCargoIdG = new Map<string, UnitItem[]>();
+    for (const u of unplaced) {
+      const list = unplacedByCargoIdG.get(u.cargoId) ?? [];
+      list.push(u);
+      unplacedByCargoIdG.set(u.cargoId, list);
+    }
+    // 미배치 cargo 가 가야 할 컨테이너 결정 (fixedMap 우선, 없으면 booking anchor, 없으면 모든 컨테이너)
+    const cargoTargetContG = new Map<string, ContainerState>();
+    for (const cid of unplacedByCargoIdG.keys()) {
+      const fix = fixedMap[cid];
+      if (typeof fix === "number") {
+        const target = containers.find((c) => c.index === fix);
+        if (target) {
+          cargoTargetContG.set(cid, target);
+          continue;
+        }
+      }
+      // fallback 1: 같은 booking 이 이미 안착한 컨테이너
+      const us = unplacedByCargoIdG.get(cid);
+      const bk = us?.[0]?.bookingNo;
+      if (bk) {
+        const anchor = bookingAnchor.get(bk);
+        if (anchor && containers.includes(anchor)) {
+          cargoTargetContG.set(cid, anchor);
+        }
+      }
+    }
+    // fallback 2: 위 두 단계로도 매핑 안 된 cargo → 모든 컨테이너에 시도 (자리 잡으면 첫 컨에 배치)
+    const targetContsG = new Set<ContainerState>(cargoTargetContG.values());
+    const unmappedCargoIdsG = new Set<string>();
+    for (const cid of unplacedByCargoIdG.keys()) {
+      if (!cargoTargetContG.has(cid)) {
+        unmappedCargoIdsG.add(cid);
+        // 모든 컨테이너를 후보에 추가 (첫 컨테이너부터 시도)
+        for (const cont of containers) targetContsG.add(cont);
+      }
+    }
+    for (const cont of targetContsG) {
+      // 이 컨에 가야 할 미배치 unit 만 풀에 (룰 G 는 same cargoId 만)
+      const cargoIdsForThisContG = new Set<string>();
+      for (const [cid, c] of cargoTargetContG) {
+        if (c === cont) cargoIdsForThisContG.add(cid);
+      }
+      const poolG: UnitItem[] = [];
+      for (const cid of cargoIdsForThisContG) {
+        const us = unplacedByCargoIdG.get(cid);
+        if (us) poolG.push(...us);
+      }
+      // unmapped cargo (fixedMap·anchor 둘 다 없는 것) 매 컨테이너마다 시도
+      for (const cid of unmappedCargoIdsG) {
+        const us = unplacedByCargoIdG.get(cid);
+        if (us && us.every((u) => unplaced.includes(u))) {
+          poolG.push(...us);
+        }
+      }
+      if (poolG.length === 0) continue;
+      const placedIdsG = preClusterRowLane(
+        cont,
+        poolG,
+        options?.footprintCluster,
+      );
+      if (placedIdsG.size > 0) {
+        const remainingG = unplaced.filter((u) => !placedIdsG.has(u.unitId));
+        unplaced.length = 0;
+        for (const u of remainingG) unplaced.push(u);
+        for (const id of placedIdsG) {
+          const u = poolG.find((x) => x.unitId === id);
+          if (u) recordBookingAnchor(u, cont);
+        }
+      }
+    }
+  }
+
+  // 5.45) **룰 F — 근사 footprint 적층 묶음 (nearFootprintStackBundle)** — wrapper 전용 fallback
+  //
+  // 활성 조건 10: 룰 E (exact W·L·H 동일) 후 unplaced 가 남았을 때만 발동.
+  // 같은 booking + cargoId atomic + W/L 차이 ≤ 5cm 까지 허용 (높이 다름 OK).
+  // 활성 조건 5+6+7+8 모두 적층 단계마다 재검증. partial cargoId 발생 시 전체 롤백.
+  // 성능 보호 — 미배치 cargo 가 가야 할 컨테이너에 대해서만 시도, 전역 brute force X.
+  //
+  // 사례: SK GEO CENTRIC (FBSIN260431) — 같은 booking + 137×115×85 ×1 + 135×115×129 ×2,
+  //   footprint W 차이 2cm. 그러나 noStacking=true 면 활성 조건 6 위반으로 묶음 안 됨.
+  //   (이 케이스는 위 5.44 룰 G 가 처리)
+  if (
+    unplaced.length > 0 &&
+    mode_placement === "wrapper" &&
+    options?.footprintCluster?.enabled !== false
+  ) {
+    // 미배치 cargoId 별 unit 모음 (이번 라운드 fallback 대상)
+    const unplacedByCargoId = new Map<string, UnitItem[]>();
+    for (const u of unplaced) {
+      const list = unplacedByCargoId.get(u.cargoId) ?? [];
+      list.push(u);
+      unplacedByCargoId.set(u.cargoId, list);
+    }
+    // 미배치 cargo 가 가야 할 컨테이너 결정 (fixedMap 우선)
+    const cargoTargetCont = new Map<string, ContainerState>();
+    for (const cid of unplacedByCargoId.keys()) {
+      const fix = fixedMap[cid];
+      if (typeof fix === "number") {
+        const target = containers.find((c) => c.index === fix);
+        if (target) cargoTargetCont.set(cid, target);
+      }
+    }
+    // 컨테이너별로 fallback 시도
+    const targetConts = new Set<ContainerState>(cargoTargetCont.values());
+    for (const cont of targetConts) {
+      // 이 컨테이너로 갈 unplaced cargoId 들 + 같은 booking 의 이미 배치된 unit (지지대 검증용은 아님)
+      // pool = 이 컨에 들어가야 할 미배치 unit + 같은 booking 의 미배치 unit (없으면 빈 풀)
+      const cargoIdsForThisCont = new Set<string>();
+      for (const [cid, c] of cargoTargetCont) {
+        if (c === cont) cargoIdsForThisCont.add(cid);
+      }
+      const pool: UnitItem[] = [];
+      for (const cid of cargoIdsForThisCont) {
+        const us = unplacedByCargoId.get(cid);
+        if (us) pool.push(...us);
+      }
+      // 같은 booking 의 다른 미배치 unit 도 끌어들임 (cargo cross 묶음 후보)
+      const bookingsInPool = new Set(pool.map((u) => u.bookingNo).filter(Boolean));
+      for (const u of unplaced) {
+        if (pool.includes(u)) continue;
+        if (!u.bookingNo) continue;
+        if (!bookingsInPool.has(u.bookingNo)) continue;
+        // 같은 booking 의 다른 미배치 unit — 같은 컨테이너 후보 검증
+        const fix = fixedMap[u.cargoId];
+        if (typeof fix === "number") {
+          const target = containers.find((c) => c.index === fix);
+          if (target !== cont) continue; // 다른 컨이면 끌어들이지 X
+        }
+        pool.push(u);
+      }
+      if (pool.length === 0) continue;
+      const placedIds = preClusterNearFootprint(
+        cont,
+        pool,
+        options?.footprintCluster,
+      );
+      if (placedIds.size > 0) {
+        // 이미 배치된 unit 들을 unplaced 에서 제거
+        const remaining = unplaced.filter((u) => !placedIds.has(u.unitId));
+        unplaced.length = 0;
+        for (const u of remaining) unplaced.push(u);
+        // booking anchor 갱신
+        for (const id of placedIds) {
+          const u = pool.find((x) => x.unitId === id);
+          if (u) recordBookingAnchor(u, cont);
+        }
+      }
+    }
   }
 
   // 5.5) Stage 4 자리 바꾸기 패스 — 미배치 발생 시만 발동

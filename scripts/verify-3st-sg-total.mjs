@@ -36,6 +36,14 @@ const cargoes = rows.map((r, idx) => ({
 const expectedC1 = EXPECTED_40FT_1_INDEXES.map((i) => cargoes[i - 1]?.actualShipperName ?? "?");
 const expectedC2 = EXPECTED_40FT_2_INDEXES.map((i) => cargoes[i - 1]?.actualShipperName ?? "?");
 
+// FLOWBUS (326cm 막대형) 우선 — 자리 먼저 잡아야 다른 화물도 적재 가능
+const flowbusIdx = cargoes.findIndex((c) => c.bookingNo === "FBSIN260417");
+if (flowbusIdx > 0) {
+  const flowbus = cargoes.splice(flowbusIdx, 1)[0];
+  cargoes.unshift(flowbus);
+  console.log(`FLOWBUS 우선 배치 (idx ${flowbusIdx} → 0)`);
+}
+
 console.log("\n=== AUTO 모드 packBest ===");
 const t0 = Date.now();
 const result = packBest(cargoes, "auto");

@@ -1,7 +1,17 @@
 # clpclaude 분배 알고리즘 파이프라인
 
 > **자동 갱신 룰**: `lib/packing/algorithm.ts` 수정 시 이 파일도 함께 보강할 것 (rule: `keep-algorithm-pipeline-updated`).
-> 마지막 갱신: 2026-05-11 (① 무게 적층 룰 엄격화 — `STACK_WEIGHT_TOLERANCE` 1.5 → 1.0 (위 박스 무게 ≤ 아래 박스 무게, 사용자 의도). ② `tryPlaceUnitBruteForce` budget+실패 cache 추가 — pack-attempt 1500회·unit 80회 상한, (unit+container+state fingerprint) 실패 캐시 → 같은 state 재시도 차단. ③ 백트래킹 unplacedSet cache — 같은 미배치 셋 두 번째 등장 시 break. ④ `lib/packing/audit.ts` 신규 — `strictStackAudit` 좌표 기반 사후 검증 함수. 결과: 3번 SG 80분+ 미수렴 → 4분 41초로 17배+ 단축, 5 샘플 모두 회귀 0건. 4.5 발바닥 사전 묶음 입구 258 검사 제거 동시 적용)
+> 마지막 갱신: 2026-05-12 (**룰 G — Row-lane 묶음 (footprint-cluster.ts `preClusterRowLane`)**: 같은 cargoId 박스가 noStacking=true 라서 위로 못 쌓는 케이스를 두 컬럼 폭 방향 옆 + 각 컬럼 안 길이 방향 직렬 배치로 푼다. 모든 박스 z=0 강제 (noStacking 보호). pickLaneFace 가 allowedFaces 안에서 eff.width 작은 면 lex 우선으로 골라 두 컬럼 폭 합 ≤ 컨 안쪽 폭 보장. 활성 조건 10개 모두 검증: ①same cargoId (booking 확장 X) ②noStacking 단 한 박스라도 있으면 모든 unit z=0 강제 ③W/L footprint 차이 ≤5cm ④두 컬럼 이하 ⑤allowedFaces 안에서만 ⑥pickLaneFace 신규 (long-axis-anchor 재사용 X) ⑦orientation=fixed 면 face 0 만 ⑧충돌·경계·atomic·strictStackAudit 통과 ⑨실패/partial 시 전체 롤백 (snapshot 복원) ⑩발동 로그 모듈 변수 (production console.log 금지). 호출 위치: algorithm.ts 5.44 단계 (룰 F 직전, wrapper 모드 + unplaced > 0 시만). 사례: SK GEO CENTRIC (FBSIN260431) sg3-35 — 137×115×85 ×1 + 135×115×129 ×2 모두 noStacking=true. face 1(L×W) 회전 → 폭 115, 두 컬럼 230 ≤ 234. 첫 컬럼 137 + 둘째 컬럼 135+135 직렬. 단위 테스트 40/40 통과 (룰 G 신규 8종). 회귀 매트릭스: 2ST SG TOTAL ✅, 1ST HM TOTAL ✅.)
+>
+> 이전 갱신: 2026-05-12 (**룰 F — 근사 footprint 적층 묶음 (footprint-cluster.ts `preClusterNearFootprint`)**: 룰 E (정확 동일) 가 풀지 못한 잔여 미배치 unit 풀에 한해서만 fallback 으로 발동. 같은 booking + cargoId atomic + W/L 차이 각각 ≤ 5cm 허용 (높이 다름 OK). 활성 조건 12개 모두 검증: ①같은 booking ②cargoId atomic ③W/L 차이 ≤5cm ④높이 다름 허용 ⑤아래 footprint ≥ 위 footprint ⑥noStacking/bottomOnly 위반 없음 ⑦위 무게 ≤ 아래 무게 (STACK_WEIGHT_TOLERANCE=1.0) ⑧총 적층 높이 ≤ 컨 안쪽 높이 ⑨두 컬럼 이하 (NEAR_MAX_COLUMNS=2) ⑩exact 룰 E 후 미배치 잔여 시만 fallback ⑪partial cargoId 발생 시 전체 롤백 ⑫strictStackAudit 통과 (조건 5+7 적층 단계마다 재검증). 성능 보호: 전역 brute force 금지, 미배치 cargo 의 fixedMap 컨테이너만 시도, 컨 당 최대 8 booking. 단일 cargo + 동일 W·L 묶음은 룰 A 영역으로 패스 (회귀 방지). 호출 위치: algorithm.ts 5.45 단계 (5.5 자리 바꾸기 직전, wrapper 모드 + unplaced > 0 시만). 사례: SK GEO CENTRIC (FBSIN260431) 137×115×85 + 135×115×129 같은 booking — noStacking=true 면 활성 조건 6 위반으로 발동 안 됨 (실제 데이터). 단위 테스트 32/32 통과 (룰 F 신규 9종). 회귀 매트릭스: pack 본체 12.5초·미배치 1·회귀 0; 2ST SG TOTAL PASS·pack 344ms·미배치 0.)
+>
+> 이전 갱신: 2026-05-12 (**룰 E — cross-cargoId 동일 사이즈 묶음 (footprint-cluster.ts 신규)**: 같은 booking 안 cargoId 가 다른 unit 들 중 W·L·H 모두 정확히 동일한 박스 그룹을 통째로 묶어 같은 row 옆 컬럼들 + 천장까지 적층. 활성 조건 보수적: 같은 booking + 정확히 동일 사이즈 + noStacking=false + 두 컬럼 폭 ≤ 컨 안쪽 폭 + 그룹 unit ≥ 3. CBM 쪼개기 보호 사전 필터: 사용 가능한 슬롯 (두 컬럼 × 천장 단수) 기준으로 cargoId atomic 통째로 들어갈 cargo 만 picked. 사례: VPHI 부킹 (FBSIN260400) sg3-23/24/25 같은 booking + 114×114×71 박스 7개 cross-cargo 묶음 — 룰 E 가 5박스 두 컬럼 3+2단 적층, 룰 A 가 같은 booking 동일 footprint sg3-24 2박스 별도 컬럼 → 7박스 모두 같은 컨, 사용자 답안 재현. 단위 테스트 23/23 통과 (룰 E 신규 7종 + 헬퍼 3종). 회귀 매트릭스 5종 미배치 0 유지.)
+>
+> 이전 갱신: 2026-05-12 (`tryBundleStack` 옆 컬럼 적층 — 같은 cargoId 동일 사이즈 unit 이 첫 컬럼 (수직 N단) 다 채운 뒤에도 남으면 같은 row 평면 옆 자리 (x = 첫 컬럼 x + 폭) 에 두 번째 컬럼 강제 적층 시도)
+>
+> 이전 갱신: 2026-05-12 (Row-lane bundle 추가 — `lib/packing/long-axis-anchor.ts` `SLENDERNESS_THRESHOLD` 0.25 → 0.40 완화 + `tryRowLaneAnchor` 신규 함수 추가. FLOWBUS 326×116×110 ×2 같은 동일 규격 막대형 묶음을 z=0 한 row 평면에 폭 방향으로 나란히 배치 — 116+116=232 ≤ 234 컨 폭. 큐브형 0.5+ 차단 그대로 유지 → 회귀 0건 목표. 단위 테스트 18/18 통과)
+>
+> 이전 갱신: 2026-05-11 (① 무게 적층 룰 엄격화 — `STACK_WEIGHT_TOLERANCE` 1.5 → 1.0 (위 박스 무게 ≤ 아래 박스 무게, 사용자 의도). ② `tryPlaceUnitBruteForce` budget+실패 cache 추가 — pack-attempt 1500회·unit 80회 상한, (unit+container+state fingerprint) 실패 캐시 → 같은 state 재시도 차단. ③ 백트래킹 unplacedSet cache — 같은 미배치 셋 두 번째 등장 시 break. ④ `lib/packing/audit.ts` 신규 — `strictStackAudit` 좌표 기반 사후 검증 함수. 결과: 3번 SG 80분+ 미수렴 → 4분 41초로 17배+ 단축, 5 샘플 모두 회귀 0건. 4.5 발바닥 사전 묶음 입구 258 검사 제거 동시 적용)
 
 ---
 
@@ -74,6 +84,19 @@
 3. 그 컨의 packState 스냅샷 → bundle stack + 솔로 fallback 으로 모든 unit 통째 시도
 4. 다 들어가면 commit, **하나라도 실패하면 스냅샷 복원 → 다음 컨 시도**
 5. 어느 컨도 통째 못 받으면 그 cargo 전체 **미배치** 분류 (쪼개기 절대 금지 ✅)
+
+#### `tryBundleStack` 묶음 stack 동작 (확장 — 2026-05-12)
+
+| 단계 | 동작 |
+|---|---|
+| ① 동일 사이즈 검사 | 같은 cargoId 의 모든 unit 이 (w,l,h) 동일이어야 진입 (`allUnitsSameSize`) |
+| ② 첫 컬럼 face 선택 | 컨 안에 들어가고 stack 효율 좋은 회전 면 선택 (`pickBundleFace`) |
+| ③ 첫 컬럼 적층 | (x₀, y₀, z=0) 부터 위로 N단 적층, plannedStack 도달 시 종료 |
+| ④ **옆 컬럼 적층 (신규)** | group 에 unit 더 남았으면 같은 (y₀, z=0) 의 옆 (x=x₀+폭) 에 같은 face 강제로 두 번째 컬럼 base 시도 |
+| ⑤ 옆 컬럼 위 적층 | base 박음 성공하면 그 위로 plannedStack-1 단까지 강제 적층 |
+| ⑥ 폭 한도 시 종료 | 다음 컬럼 폭이 컨 안쪽 폭 초과하면 종료, 남은 unit 은 호출자 fallback |
+
+**활성 조건 (보수적)**: 같은 cargoId 안에서만, 한 row 안에서만, noStacking=false 인 경우만. cross-cargoId 묶음은 다루지 않음 (회귀 위험 고려) — 다른 cargoId 끼리의 옆 묶음은 `footprint-cluster` 단계에서 같은 booking 끼리만 처리.
 
 ## 4.5단계: 발바닥 사전 묶음 (큰 컨 전용 사전 컬럼 적층)
 
@@ -167,6 +190,50 @@
 
 **효과 (3ST SG TOTAL):** sg3-16 리틀스푼 1박스 미배치(이전 75분 56-매트릭스에서도 못 풀던 NP-hard 케이스) → **lightMode (12 매트릭스, 1초)에서도 0 미배치 도달**.
 
+### 룰 E — cross-cargoId 동일 사이즈 묶음 (2026-05-12 추가)
+
+**왜 필요했나**
+
+- 룰 A 는 같은 booking + 같은 footprint(±5cm) 박스를 컬럼 1개로만 묶음
+- VPHI 같은 케이스: 같은 booking 안 cargoId 가 다른 박스가 모두 W·L·H 정확히 동일하면, **사용자 답안은 같은 row 옆에 두 컬럼 + 천장까지 적층** 후 마지막 1박스
+- 룰 A·B 는 cargoId 경계 안에서만 컬럼 만들어서 옆 컬럼이 다른 row 로 흩어져 자리 낭비
+
+**한 줄 원리**
+
+> "같은 발송 부킹 안 박스 사이즈가 정확히 같으면, 화물 행이 달라도 옆에 묶어서 천장까지 한 row 에 쌓아라"
+
+**이삿짐 트럭 비유** — 같은 거래처 짐이라 묶음표가 같고 박스 사이즈도 모두 똑같으면, 행이 다르더라도 같은 줄 옆에 차곡차곡 쌓는다.
+
+| 단계 | 동작 |
+|---|---|
+| ① 후보 그룹 검색 | 같은 booking 안 W·L·H 정확히 동일 (±0) + noStacking=false 인 박스 모음 — 그룹 unit ≥ 3 |
+| ② cargo atomic 사전 필터 | 두 컬럼 × 천장 단수 = 슬롯 수 산출, cargoId 별로 통째 들어갈 cargo 만 picked (CBM 쪼개기 절대 룰 보호) |
+| ③ 첫 컬럼 base 박기 | deepAnchor 우선 (안쪽 끝 y 최댓값), 실패 시 자연 EP 또는 brute-force |
+| ④ 첫 컬럼 천장까지 적층 | 같은 (x,y) 강제, heavierBelow + 무게 한도 + 천장 검사 |
+| ⑤ 옆 컬럼 시작 | x = 첫 컬럼 x + 폭, 같은 row(y) z=base, 충돌 검사 통과 시 base 박기 |
+| ⑥ 옆 컬럼 천장까지 적층 | ④ 와 동일 |
+| ⑦ 폭 한도 도달 시 종료 | 다음 컬럼 폭 (x + 2*폭) > 컨 안쪽 폭 → 종료, 남은 unit 은 룰 A·B·정식 wrapper 에 위임 |
+
+**활성 조건 (보수적)**
+
+| 조건 | 값 |
+|---|---|
+| 같은 booking 그룹 unit | ≥ 3 (작은 묶음은 룰 A 가 처리) |
+| 사이즈 비교 | W·L·H 정확히 동일 (±0) |
+| 다단금지 박스 | 단 한 박스라도 있으면 그룹 제외 |
+| 두 컬럼 폭 | width × 2 ≤ 컨 안쪽 폭 |
+| 한 단 높이 | ≤ 컨 천장 높이 |
+
+**사례 (3ST SG VPHI 컨2)**
+
+| 박스 | 부킹 | cargo | 사이즈 | 수량 |
+|---|---|---|---|---|
+| sg3-23 | FBSIN260400 (VPHI) | sg3-23 | 114×114×71 | 2 |
+| sg3-24 | FBSIN260400 | sg3-24 | 114×114×71 | 2 |
+| sg3-25 | FBSIN260400 | sg3-25 | 114×114×71 | 3 |
+
+→ 룰 E 가 큰 cargo 우선 picked: sg3-25(3) + sg3-23(2) = **5박스 cargo atomic** 으로 두 컬럼 3+2 단. sg3-24(2) 는 슬롯 초과로 제외 → 룰 A 가 같은 booking footprint 동일로 별도 컬럼 적층. **결과: 7박스 모두 같은 row 묶음 패턴으로 같은 컨 배치, 사용자 답안과 일치**.
+
 ## 4.6단계: 긴 막대형 박스 모서리 박음 (장축 고정점 — 자동 활성 + 임계 강화)
 
 **파일**: `lib/packing/long-axis-anchor.ts`, `lib/packing/algorithm.ts` (4.5 발바닥 사전 묶음 직전 hook)
@@ -198,9 +265,28 @@
 |---|---|---|
 | ① 절대 길이 | 최대 변 ≥ 300 cm | 311 통과 / 250 탈락 |
 | ② 컨 비례 길이 | 최대 변 ≥ 컨 길이 × 25% | 40FT(1200) → 300 이상, 20FT(590) → 148 이상 |
-| ③ 막대 형상 비율 | min 변 / max 변 ≤ 0.25 | 311×15×15 = 0.048 통과 / 114×114×71 VPHI = 0.62 탈락 |
+| ③ 막대 형상 비율 | min 변 / max 변 ≤ 0.40 | 311×15×15 = 0.048 통과 / 326×116×110 FLOWBUS = 0.337 통과 / 114×114×71 VPHI = 0.62 탈락 |
 
-→ 진짜 가는 봉 형태 (slender rod) 만 통과. 큐브형/판형은 일반 배치 그대로.
+→ 진짜 가는 봉 형태 (slender rod) + 긴 막대 (FLOWBUS급) 만 통과. 큐브형/판형은 일반 배치 그대로.
+
+**변경 이력 (2026-05-12)**: 비율 임계 0.25 → 0.40 으로 완화. FLOWBUS 326×116×110 (비율 0.337) 같은 긴 막대형이 통과해 row-lane 묶음에 들어옴. 큐브형 (0.5+) 차단은 그대로 유지 → 회귀 0건 목표.
+
+### Row-lane 묶음 (2026-05-12 추가)
+
+같은 cargoId 의 동일 크기 막대형 박스 N개를 컨테이너 폭 방향으로 나란히 한 row 평면(z=0)에 묶어 배치.
+
+| 활성 조건 | 내용 |
+|---|---|
+| ① 같은 cargoId unit ≥ 2 AND 모든 unit 동일 (w, l, h) | 동일 규격 묶음만 |
+| ② noStacking=true 또는 가장 긴 변 ≥ 컨 길이 × 25% | 적층 가능 + 짧은 박스는 row-lane 안 발동 |
+| ③ 회전 face 중 짧은 변 × N ≤ 컨 안쪽 폭 | 폭 안에 N개 나란히 들어가야 |
+
+| 동작 | 내용 |
+|---|---|
+| 회전 강제 | 가장 긴 변을 length 축에 정렬 (long-along-X) — 기존 정책 유지 |
+| 폭 방향 나열 | 첫 박스 x=0, 두 번째 x=짧은변, … 모두 z=0 한 row 평면 |
+| 통째 commit | 모두 들어가야 commit, 한 박스라도 충돌·boundary 초과 시 반환 → 기존 cursor anchor 로 폴백 |
+| 예시 | FLOWBUS 326×116×110 ×2 → 회전 후 width 116, length 326. 116+116=232 ≤ 234 컨 폭 → 두 박스 한 row 에 z=0 으로 나란히 |
 
 ### 막대형 박음 절차 (`anchorLongAxisCargoes`)
 
@@ -222,6 +308,14 @@
 | 3ST SG | 1 미배치 (sg3-8 세아특수강 311 cm) | 막대형 풀림, packBest 매트릭스+swap 으로 0 도달 시도 |
 
 → 큐브형 회귀 0건. 막대형 시나리오에서 자동 발동.
+
+### 2026-05-12 row-lane bundle 효과 (FLOWBUS 326×116×110)
+
+| 단계 | 내용 |
+|---|---|
+| 변경 전 | FLOWBUS slenderness 0.337 → 0.25 임계 못 넘어 long-axis 후보 탈락 → 일반 배치에서 row 분산 |
+| 변경 후 | 임계 0.40 통과 → row-lane 모드 발동 → 2개 박스 폭 방향 나란히 묶어 z=0 한 row block |
+| 단위 테스트 | 18/18 통과 (FLOWBUS row-lane 묶음, 큐브 200³ 거부, 단일 unit 거부, 짧은 박스 거부, FLOWBUS×3 폭 초과 거부 모두 검증) |
 
 ## 5.5단계: 자리 바꾸기 패스 (`repositionUnplaced`)
 

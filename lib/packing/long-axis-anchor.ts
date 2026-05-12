@@ -80,8 +80,14 @@ function maxSlendernessRatioOf(units: UnitItem[]): number {
   return worst;
 }
 
-/** 막대형(slenderness) 비율 임계 — min/max ≤ 0.25 인 경우만 진짜 막대형 (예: 311×15×15=0.048) */
-const SLENDERNESS_THRESHOLD = 0.25;
+/**
+ * 막대형(slenderness) 비율 임계 — min/max ≤ 0.40 인 경우만 진짜 막대형.
+ *  - 0.40 — 막대형(326×116, 비율 0.34) 까지 포함, 큐브형(0.5+) 차단 유지
+ *  - 통과 예시: 311×15×15 = 0.048, 326×116×110 FLOWBUS = 0.337
+ *  - 탈락 예시: 114×114×71 VPHI = 0.62 (큐브형 회귀 방지)
+ *  - 변경 이력 (2026-05-12): 0.25 → 0.40 (row-lane bundle 활성 위해 FLOWBUS 포함)
+ */
+const SLENDERNESS_THRESHOLD = 0.40;
 
 /**
  * 장축 anchor 후보 화물 골라내기 — 최대 변 ≥ threshold 인 cargoId 그룹 반환.
@@ -180,19 +186,168 @@ function collides3D(
 }
 
 /**
+ * Row-lane 묶음 시도 — 같은 cargoId 의 동일 크기 단행 막대형 N개를 z=0 한 row 평면에
+ * 폭 방향으로 나란히 anchor.
+ *
+ * 활성 조건:
+ *   - units.length ≥ 2 AND 모든 unit 동일 (w, l, h, weight, remarks 일관)
+ *   - noStacking=true 또는 가장 긴 변 ≥ innerLength × 0.25
+ *   - 회전 face 중 짧은 변 × N ≤ innerWidth 인 face 존재
+ *
+ * 동작:
+ *   - 가장 긴 변을 length 축 정렬, 짧은 변을 width 축 N개 나란히
+ *   - 모든 unit z=0, y는 컨 안쪽 끝(useFarEnd) 기존 정책 그대로
+ *   - 첫 box x=0, 두 번째 x=짧은변, ...  통째로 모두 들어가야 commit
+ *
+ * 반환:
+ *   - 성공 시 newPlacements[] (호출자가 commit), 실패 시 null
+ */
+function tryRowLaneAnchor(
+  units: UnitItem[],
+  state: ContainerPackState,
+  spec: ContainerSpec,
+): Placement3D[] | null {
+  if (units.length < 2) return null;
+  // 모든 unit 동일 크기 검사
+  const first = units[0];
+  for (let i = 1; i < units.length; i++) {
+    const u = units[i];
+    if (
+      u.width !== first.width ||
+      u.length !== first.length ||
+      u.height !== first.height
+    ) {
+      return null;
+    }
+    if (u.remarks.topOnly) return null;
+  }
+  if (first.remarks.topOnly) return null;
+  // 활성 조건: noStacking=true 또는 가장 긴 변 ≥ 컨 길이 × 25%
+  const longest = Math.max(first.width, first.length, first.height);
+  const longRatioOk = longest >= spec.innerLength * 0.25;
+  if (!first.remarks.noStacking && !longRatioOk) return null;
+  // 무게 한도 사전 체크
+  const totalAddWeight = units.reduce((s, u) => s + u.weight, 0);
+  if (state.totalWeight + totalAddWeight >= spec.maxWeightKg) return null;
+
+  // 회전 face 중 length 축에 가장 긴 변 정렬 + 짧은 변 × N ≤ innerWidth 인 face 우선
+  const cargoLike = {
+    width: first.width,
+    length: first.length,
+    height: first.height,
+    remarks: first.remarks,
+  };
+  const faces = allowedFaces(cargoLike);
+  let bestFace: { faceIdx: number; eff: ReturnType<typeof effectiveSizeFace> } | null = null;
+  for (const faceIdx of faces) {
+    const eff = effectiveSizeFace(cargoLike, faceIdx);
+    // 가장 긴 변이 length 축 정렬
+    if (Math.abs(eff.length - longest) > EPS) continue;
+    // N개 나란히 폭 방향으로 들어가는지
+    if (eff.width * units.length > spec.innerWidth + EPS) continue;
+    if (eff.length > spec.innerLength + EPS) continue;
+    if (eff.height > spec.innerHeight + EPS) continue;
+    // 우선순위: 높이 작은 face 선호 (낮게 깔림)
+    if (bestFace === null || eff.height < bestFace.eff.height) {
+      bestFace = { faceIdx, eff };
+    }
+  }
+  if (bestFace === null) return null;
+  const eff = bestFace.eff;
+
+  // 시작 y 위치 — 기존 정책과 동일 (안쪽 끝 우선)
+  const useFarEnd = eff.length >= spec.innerLength * 0.5;
+  const rowY = useFarEnd ? Math.max(0, spec.innerLength - eff.length) : 0;
+  // x 시작 위치 — 기존 placements 중 같은 (rowY, z=0) 라인 차지한 것 다음
+  let cursorX = 0;
+  for (const p of state.placements) {
+    if (
+      Math.abs(p.position.z) < EPS &&
+      Math.abs(p.position.y - rowY) < EPS
+    ) {
+      const xEnd = p.position.x + p.size.width;
+      if (xEnd > cursorX) cursorX = xEnd;
+    }
+  }
+  // 옆에 모두 들어가는지 재검사
+  if (cursorX + eff.width * units.length > spec.innerWidth + EPS) return null;
+
+  // 신규 placement 들 — z=0 한 row, x 가 짧은변 간격으로 나란히
+  const newPlacements: Placement3D[] = [];
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    const x = cursorX + i * eff.width;
+    const y = rowY;
+    const z = 0;
+    // 컨 boundary 재검사 (여유 EPS)
+    if (x + eff.width > spec.innerWidth + EPS) return null;
+    if (y + eff.length > spec.innerLength + EPS) return null;
+    if (z + eff.height > spec.innerHeight + EPS) return null;
+    // 기존 placements 충돌 검사
+    for (const p of state.placements) {
+      if (collides3D(x, y, z, eff.width, eff.length, eff.height, p)) return null;
+    }
+    // 새로 anchor 한 박스끼리 충돌 검사 (이론상 같은 z=0 평면 인접하므로 안 겹치지만 안전망)
+    for (const p of newPlacements) {
+      if (collides3D(x, y, z, eff.width, eff.length, eff.height, p)) return null;
+    }
+    newPlacements.push({
+      unitId: u.unitId,
+      cargoId: u.cargoId,
+      shipper: u.shipper,
+      bookingNo: u.bookingNo,
+      name: u.name,
+      cargoType: u.cargoType,
+      cfsCbm: u.cfsCbm,
+      position: { x, y, z },
+      size: { width: eff.width, length: eff.length, height: eff.height },
+      faceIdx: bestFace.faceIdx,
+      rotated: eff.width !== u.width || eff.length !== u.length,
+      weight: u.weight,
+      remarks: u.remarks,
+      layer: "bottom",
+    });
+  }
+  return newPlacements;
+}
+
+/**
  * 한 cargoId 의 unit 들을 컨테이너 모서리 (x=0, y=0) 부터 X 축을 따라 차례 anchor.
  * 통째로 모두 들어가야 commit, 하나라도 실패 시 false (호출자가 스냅샷 복원).
+ *
+ * 사전 단계 (2026-05-12 추가):
+ *   row-lane 모드 — 같은 cargoId 동일 크기 막대형 N개를 z=0 한 row 평면에 폭 방향으로
+ *   나란히 묶어 배치 (예: FLOWBUS 326×116×110 ×2 → 116+116=232 ≤ 234 컨 폭).
+ *   row-lane 성공 시 그 결과로 commit, 실패 시 기존 logic (한 줄 cursor anchor) 시도.
  */
 function anchorOneCargoOnContainer(
   units: UnitItem[],
   state: ContainerPackState,
   spec: ContainerSpec,
 ): boolean {
+  // 1) row-lane 묶음 시도 (같은 cargoId 동일 크기 막대형 ≥ 2개)
+  const rowLane = tryRowLaneAnchor(units, state, spec);
+  if (rowLane !== null) {
+    for (const p of rowLane) {
+      state.placements.push(p);
+      state.totalWeight += p.weight;
+      state.visualCbm += (p.size.width * p.size.length * p.size.height) / 1_000_000;
+      state.candidates.push(
+        { x: p.position.x + p.size.width, y: p.position.y, z: p.position.z },
+        { x: p.position.x, y: p.position.y + p.size.length, z: p.position.z },
+        { x: p.position.x, y: p.position.y, z: p.position.z + p.size.height },
+      );
+    }
+    return true;
+  }
+
+  // 2) 기존 logic — 한 줄 cursor anchor (단행 막대형 또는 row-lane 실패 시)
   // 가장 긴 unit 부터 (longest-side desc) — 안정적 베이스
   const sorted = [...units].sort(
     (a, b) =>
       Math.max(b.width, b.length, b.height) - Math.max(a.width, a.length, a.height),
   );
+
 
   // 모든 unit 의 face 선택 — 하나라도 fit 안 되는 face 면 fail
   type Plan = { unit: UnitItem; faceIdx: number; eff: ReturnType<typeof effectiveSizeFace> };
@@ -353,7 +508,10 @@ export function anchorLongAxisCargoes(
 /** 테스트용 노출 */
 export const __testables = {
   maxSideOf,
+  maxSlendernessRatioOf,
   pickLongAlongLengthFace,
   anchorOneCargoOnContainer,
+  tryRowLaneAnchor,
   DEFAULT_THRESHOLD_CM,
+  SLENDERNESS_THRESHOLD,
 };

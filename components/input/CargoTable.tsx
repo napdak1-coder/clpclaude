@@ -254,7 +254,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
             <th className="px-0 py-1 text-right">세로</th>
             <th className="px-0 py-1 text-right">높이</th>
             <th className="px-0 py-1 text-right">수량</th>
-            <th className="px-0 py-1 text-right">중량</th>
+            <th className="px-0 py-1 text-right">총 중량 (kg)</th>
             <th className="px-0 py-1 text-right">CFS CBM(입고완료)</th>
             <th className="px-0 py-1 text-right">ABOUT</th>
             <th className="px-0 py-1 text-right">시스템CBM</th>
@@ -300,7 +300,7 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                         className="cursor-help text-[9px] font-bold text-red-600 leading-none"
                         title="같은 부킹 안 한 행에 몰린 값을 수량 비율로 자동 분배"
                       >
-                        자동분배
+                        자동 분배
                       </div>
                     )}
                   </td>

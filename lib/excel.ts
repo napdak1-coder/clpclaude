@@ -142,6 +142,71 @@ export const FIELD_LABELS: Record<FieldKey, string> = {
 };
 
 /**
+ * 박스 1개 무게 자동 보정.
+ *
+ * 알고리즘은 unitSize.weight 를 "박스 1개 무게" 로 사용 (algorithm.ts:131,
+ * extreme-point.ts:850). 그러나 엑셀에서 사용자가 G.W/T 컬럼에 행 총중량을
+ * 적고, 같은 값을 모든 사이즈 그룹의 weight 칸에도 그대로 박아둔 양식이
+ * 발견됨. 이 경우 박스 1개가 행 총중량으로 처리돼 다단·중량 룰이 깨진다.
+ *
+ * 보정 룰:
+ *  - 모든 unitSize.weight 가 cargo 의 행 총중량(weightPerUnitKg) 과
+ *    같으면(오차 1% 이내) AND cargo.quantity > 1
+ *    → 박스1개 무게 = 행총중량 / Σunit.quantity 로 통일
+ *  - weight 가 0/누락이면 그대로 둠 (차선책 경로 유지)
+ *  - 정상값이면 그대로 둠
+ *
+ * 순수 함수. cargo 자체는 변형하지 않고 보정된 unitSizes 배열만 반환
+ * (보정 불필요 시 null).
+ */
+export interface UnitSizeWeightLike {
+  width: number;
+  length: number;
+  height: number;
+  quantity: number;
+  weight: number;
+}
+
+export interface CargoLikeForUnitWeightFix {
+  quantity: number;
+  weightPerUnitKg: number;
+  unitSizes?: UnitSizeWeightLike[];
+}
+
+const UNIT_WEIGHT_TOLERANCE = 0.01; // 1%
+
+function approxEqualWeight(a: number, b: number): boolean {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  if (a === 0 && b === 0) return true;
+  if (a === 0 || b === 0) return false;
+  return Math.abs(a - b) / Math.max(Math.abs(a), Math.abs(b)) <= UNIT_WEIGHT_TOLERANCE;
+}
+
+export function correctInflatedUnitWeights<T extends UnitSizeWeightLike>(
+  cargo: CargoLikeForUnitWeightFix,
+  unitSizes: T[],
+): T[] | null {
+  if (!unitSizes || unitSizes.length === 0) return null;
+  const wpu = Number(cargo.weightPerUnitKg) || 0;
+  const qty = Number(cargo.quantity) || 0;
+  if (wpu <= 0 || qty <= 1) return null;
+
+  const totalUnitQty = unitSizes.reduce(
+    (acc, u) => acc + (Number(u.quantity) || 0),
+    0,
+  );
+  if (totalUnitQty <= 0) return null;
+
+  const allEqualWpu = unitSizes.every((u) =>
+    approxEqualWeight(Number(u.weight) || 0, wpu),
+  );
+  if (!allEqualWpu) return null;
+
+  const fixed = Number((wpu / totalUnitQty).toFixed(3));
+  return unitSizes.map((u) => ({ ...u, weight: fixed }));
+}
+
+/**
  * 빈 헤더(`__EMPTY`, `__EMPTY_1`)를 사용자 친화적 표시명으로 변환.
  * 매핑 키로는 원본 헤더(`__EMPTY...`)를 그대로 써야 행 데이터에 접근 가능하므로
  * UI 표시용으로만 사용.

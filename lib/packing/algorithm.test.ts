@@ -328,3 +328,78 @@ describe("pack — 중량 한도", () => {
     assert.ok(placed + unplacedUnitCount === 20);
   });
 });
+
+describe("tryBundleStack — row 같은 평면 옆 컬럼 적층 (2026-05-12 추가)", () => {
+  it("같은 cargoId 동일 사이즈 4 unit, 2단 stack 가능 폭 → 두 컬럼 옆에 (총 4 박스 같은 row)", () => {
+    // 컨 폭 234, 박스 114×114×71. 한 컬럼 2단 + 옆 컬럼 2단 = 4 박스, 폭 114+114=228 ≤ 234.
+    // 천장 268 / 71 = 3단 가능 (plannedStack=3) → group 4 unit 이면 첫 컬럼 3단 + 옆 컬럼 1단 = 4
+    const cargoes = [
+      makeCargo({
+        id: "vphi-like",
+        width: 114,
+        length: 114,
+        height: 71,
+        weightPerUnit: 250,
+        quantity: 4,
+      }),
+    ];
+    const result = pack(cargoes, "40ft_only");
+    assert.equal(result.unplaced.length, 0, "4 박스 모두 배치되어야 함");
+    // 한 컨에 모두
+    const placedCount = result.containers.reduce(
+      (s, c) => s + c.rows.reduce((rs, r) => rs + r.bottomItems.length + r.topItems.length, 0),
+      0,
+    );
+    assert.equal(placedCount, 4, "4 박스 모두 visualization 에 배치");
+  });
+
+  it("같은 cargoId 6 unit (114×114×71) → 두 컬럼 3단씩 같은 row", () => {
+    // 천장 268 / 71 = 3단. 폭 114+114=228 ≤ 234 → 두 컬럼 3단 = 6 박스
+    const cargoes = [
+      makeCargo({
+        id: "rmc-6",
+        width: 114,
+        length: 114,
+        height: 71,
+        weightPerUnit: 250,
+        quantity: 6,
+      }),
+    ];
+    const result = pack(cargoes, "40ft_only");
+    assert.equal(result.unplaced.length, 0, "6 박스 모두 배치");
+  });
+
+  it("noStacking=true 화물 → row-multi-column 안 발동 (기존 단독 배치 동일)", () => {
+    const cargoes = [
+      makeCargo({
+        id: "ns",
+        width: 114,
+        length: 114,
+        height: 71,
+        weightPerUnit: 250,
+        quantity: 4,
+        remarks: { noStacking: true },
+      }),
+    ];
+    const result = pack(cargoes, "40ft_only");
+    // tryBundleStack 입구에서 noStacking=true 면 즉시 return → 추가 코드 비활성, 회귀 0
+    // 단독 배치로 모두 들어가야
+    assert.ok(result.unplaced.length === 0, "noStacking=true 도 모두 배치 (단독 배치 fallback)");
+  });
+
+  it("폭 초과 (200×200×100, 컨 폭 234) → 두 번째 컬럼 폭 초과 → 첫 컬럼만 적층, 나머지 자유 배치", () => {
+    // 두 박스 200+200=400 > 234 → 옆 컬럼 거부, 첫 컬럼만 stack. 4 박스 어딘가 다 들어가야 (회귀 0).
+    const cargoes = [
+      makeCargo({
+        id: "wide",
+        width: 200,
+        length: 200,
+        height: 100,
+        weightPerUnit: 100,
+        quantity: 4,
+      }),
+    ];
+    const result = pack(cargoes, "40ft_only");
+    assert.equal(result.unplaced.length, 0, "200×200×100 ×4 → 40FT 한 컨에 모두");
+  });
+});
