@@ -461,6 +461,12 @@ const SAMPLE_FILES: Array<{
     filename: "싱가폴 TOTAL 세번째.xlsx",
   },
   {
+    key: "singapore-total-4",
+    label: "4ST SG TOTAL",
+    url: "/samples/singapore-total-4.xlsx",
+    filename: "싱가폴 TOTAL 네번째.xlsx",
+  },
+  {
     key: "hochiminh-total",
     label: "1ST HM TOTAL",
     url: "/samples/hochiminh-total.xlsx",
