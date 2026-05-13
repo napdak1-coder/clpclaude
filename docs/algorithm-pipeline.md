@@ -1,7 +1,18 @@
 # clpclaude 분배 알고리즘 파이프라인
 
 > **자동 갱신 룰**: `lib/packing/algorithm.ts` 수정 시 이 파일도 함께 보강할 것 (rule: `keep-algorithm-pipeline-updated`).
-> 마지막 갱신: 2026-05-12 (**룰 G 사전 묶음 승격 — 5.36 단계 신규 + 활성 조건 강화 (variable unitSizes + noStacking 필터)**: 룰 G 를 기존 5.44 fallback (룰 F 직전) 만이 아니라 **5.36 사전 단계 (preClusterFootprint 직후, 일반 placeQueue 직전)** 에도 호출해 noStacking=true + variable unitSizes 묶음이 일반 박스에 자리 빼앗기기 전에 우선 row-lane 배치. fallback 단계 (5.44) 는 안전망으로 그대로 유지. `groupNearRowLaneBundles` 에 신규 두 조건: ① 적어도 한 unit 이 noStacking=true (적층 금지 보호 필요한 묶음만) ② variable unitSizes — 같은 cargoId 안 unit 사이즈가 모두 정확히 동일하면 skip (일반 큐가 처리). cargoId atomic 보호 — partial 발생 시 전체 롤백 (tryPlaceRowLaneBundle snapshot 복원). 모든 활성 컨테이너에 시도 (fixedAssignment 금지, 사용자 룰 6). 사례: SK GEO CENTRIC (FBSIN260431) sg3-35 — 변경 전 통합 환경에서 1건 미배치 (일반 박스 자리 다 차지한 뒤 룰 G 호출 → 빈 공간 없음, pack 시간 487초) → 변경 후 미배치 0건, pack 시간 5.5초 (88배 단축). 단위 테스트 109/109 통과. 회귀 매트릭스 5/5: 1ST SG (미배치 0·mismatch 8 동일), 2ST SG (PASS 동일), 3ST SG (미배치 1→0·mismatch 29→28 개선), 1ST HM (PASS 동일), 2ST HM (미배치 0 동일·mismatch 30→28 개선). 회귀 0건 확인.)
+> 마지막 갱신: 2026-05-13 (**cbmSource 인프라 + 컨테이너 셋 결정용 declared CBM 헬퍼 (2차-A) + `/api/pack` useCandidateUnion 옵션 (2차-A-2)**):
+> ① `types/cargo.ts` 에 `CargoCbmSource` (6종: excel-cfs/manual-cfs/distributed-cfs/distributed-about/calculated/legacy-cfs) + `UnitSizeCbmSource` (5종: user/calculated/distributed-cfs/distributed-about/legacy-unit-cbm) 신규.
+> ② `CargoSpec.cbmSource` + `UnitSize.cbmSource` 필드 추가 (옵셔널).
+> ③ ExcelImport 파싱 → 'excel-cfs', 메인 표 직접 입력 → 'manual-cfs', distributeBookingValues 분배 → 'distributed-cfs/about', UnitSizesModal 자동 분배 → 'distributed-cfs/about/calculated', 모달 직접 입력 → 'user'.
+> ④ DB 마이그레이션 0011: `cargo_items.cbm_source` 컬럼 추가, legacy 폴백 'legacy-cfs' 처리.
+> ⑤ `getDeclaredCbmForContainerDecision(c)` 헬퍼: CFS 계열 → ABOUT → 시스템 CBM 순으로 컨 셋 결정용 부피 계산.
+> ⑥ `pack()` 안 `_dbgUserDeclaredTotalCbm` 가 헬퍼 사용 → `packBestWithCandidateUnion` declared 후보 생성이 cbmSource 기반으로 정확해짐.
+> ⑦ `/api/pack` 라우트에 `useCandidateUnion` 옵션 추가 — 기본 false (packBest 그대로), true 면 `packBestWithCandidateUnion` 사용. 응답에 `decisionMode: 'packBest' | 'candidateUnion'` 부착.
+> 검증: 단위 테스트 54/54, 10 샘플 production 경로 회귀 0, useCandidateUnion=true 시 망작 SG 40FT 1대 단락 채택 / 4ST HM 40+40+20 유지 / 5ST SG 40+40 유지. 성능 이슈: 4ST HM candidateUnion 79.5s (별도 과제).
+> classify 본체·Rule G/D/E/audit 무변경. production 기본 경로 영향 0.
+>
+> 이전 갱신: 2026-05-12 (**룰 G 사전 묶음 승격 — 5.36 단계 신규 + 활성 조건 강화 (variable unitSizes + noStacking 필터)**: 룰 G 를 기존 5.44 fallback (룰 F 직전) 만이 아니라 **5.36 사전 단계 (preClusterFootprint 직후, 일반 placeQueue 직전)** 에도 호출해 noStacking=true + variable unitSizes 묶음이 일반 박스에 자리 빼앗기기 전에 우선 row-lane 배치. fallback 단계 (5.44) 는 안전망으로 그대로 유지. `groupNearRowLaneBundles` 에 신규 두 조건: ① 적어도 한 unit 이 noStacking=true (적층 금지 보호 필요한 묶음만) ② variable unitSizes — 같은 cargoId 안 unit 사이즈가 모두 정확히 동일하면 skip (일반 큐가 처리). cargoId atomic 보호 — partial 발생 시 전체 롤백 (tryPlaceRowLaneBundle snapshot 복원). 모든 활성 컨테이너에 시도 (fixedAssignment 금지, 사용자 룰 6). 사례: SK GEO CENTRIC (FBSIN260431) sg3-35 — 변경 전 통합 환경에서 1건 미배치 (일반 박스 자리 다 차지한 뒤 룰 G 호출 → 빈 공간 없음, pack 시간 487초) → 변경 후 미배치 0건, pack 시간 5.5초 (88배 단축). 단위 테스트 109/109 통과. 회귀 매트릭스 5/5: 1ST SG (미배치 0·mismatch 8 동일), 2ST SG (PASS 동일), 3ST SG (미배치 1→0·mismatch 29→28 개선), 1ST HM (PASS 동일), 2ST HM (미배치 0 동일·mismatch 30→28 개선). 회귀 0건 확인.)
 >
 > 이전 갱신: 2026-05-12 (**룰 G — Row-lane 묶음 (footprint-cluster.ts `preClusterRowLane`)**: 같은 cargoId 박스가 noStacking=true 라서 위로 못 쌓는 케이스를 두 컬럼 폭 방향 옆 + 각 컬럼 안 길이 방향 직렬 배치로 푼다. 모든 박스 z=0 강제 (noStacking 보호). pickLaneFace 가 allowedFaces 안에서 eff.width 작은 면 lex 우선으로 골라 두 컬럼 폭 합 ≤ 컨 안쪽 폭 보장. 활성 조건 10개 모두 검증: ①same cargoId (booking 확장 X) ②noStacking 단 한 박스라도 있으면 모든 unit z=0 강제 ③W/L footprint 차이 ≤5cm ④두 컬럼 이하 ⑤allowedFaces 안에서만 ⑥pickLaneFace 신규 (long-axis-anchor 재사용 X) ⑦orientation=fixed 면 face 0 만 ⑧충돌·경계·atomic·strictStackAudit 통과 ⑨실패/partial 시 전체 롤백 (snapshot 복원) ⑩발동 로그 모듈 변수 (production console.log 금지). 호출 위치: algorithm.ts 5.44 단계 (룰 F 직전, wrapper 모드 + unplaced > 0 시만). 사례: SK GEO CENTRIC (FBSIN260431) sg3-35 — 137×115×85 ×1 + 135×115×129 ×2 모두 noStacking=true. face 1(L×W) 회전 → 폭 115, 두 컬럼 230 ≤ 234. 첫 컬럼 137 + 둘째 컬럼 135+135 직렬. 단위 테스트 40/40 통과 (룰 G 신규 8종). 회귀 매트릭스: 2ST SG TOTAL ✅, 1ST HM TOTAL ✅.)
 >
@@ -61,6 +72,12 @@
 | 모든 행이 c.cbm 입력 + 화물 ≥ 2개 | **통로 A 전체 위임** (전부 입고완료 출하 케이스) |
 
 → "사이즈 적힌 건 다 시각" 룰 보장. cargoType 은 화면 라벨/색 구분 등에만 사용.
+
+**진단 옵션**: `PackOptions.strictVisualClassification = true` (production 기본 X — 옵션) 일 때 위 표 3번째 룰에 `anyHasSize` 가드 적용 → 사이즈 입력된 행이 한 건이라도 있으면 룰 1 우회. 자동 계산 CBM / distributeBookingValues 분배 결과로 all `c.cbm > 0` 가 돼도 사이즈 있는 행을 visual 트랙으로 보냄. 진단/실험용, production 호출 경로 (`/api/pack` 기본값) 영향 0.
+
+**컨 셋 결정용 declared CBM (2026-05-13 2차-A)**: `getDeclaredCbmForContainerDecision(c)` 헬퍼가 cbmSource 라벨 기준으로 우선순위 적용 — ① CFS 계열 (excel-cfs / manual-cfs / distributed-cfs / legacy-cfs) → `c.cbm`, ② `c.aboutCbm > 0` → ABOUT, ③ 폴백 → `cargoCbm(c)` (시스템 CBM). `packBestWithCandidateUnion` 의 declared 후보 생성에 직결되어 calculated 행이 사용자 신고 CFS 로 오인되는 결함 해소.
+
+**`/api/pack` 라우트 (2026-05-13 2차-A-2)**: `useCandidateUnion: true` 옵션 시 `packBestWithCandidateUnion` 사용 (기본 false → 기존 `packBest`). 응답 summary 에 `decisionMode: 'packBest' | 'candidateUnion'` 부착.
 
 ### 통로 A — 박스 무더기 (CT/입고완료, 무차원)
 

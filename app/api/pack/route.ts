@@ -6,10 +6,17 @@
  *   allowVisualInExclusive (bool)             — 위 컨테이너에 시각 화물 허용
  *   allowCtInExclusive (bool)                 — 위 컨테이너에 CT 카톤 허용
  *   preview (bool)                            — DB 저장 생략 (미리보기)
+ *   useCandidateUnion (bool)                  — declared/physical 후보 union 시도 (2026-05-13 2차-A-2)
+ *                                               기본 false → 기존 packBest 그대로
+ *                                               true → packBestWithCandidateUnion 사용
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { packBest, type PackOptions } from "@/lib/packing/algorithm";
+import {
+  packBest,
+  packBestWithCandidateUnion,
+  type PackOptions,
+} from "@/lib/packing/algorithm";
 import { getShipment } from "@/lib/repositories/shipments";
 import { savePlan } from "@/lib/repositories/clpPlans";
 import type { ContainerMode } from "@/types/plan";
@@ -49,6 +56,7 @@ export async function POST(req: NextRequest) {
     }
     const mode = parseMode(obj.mode);
     const preview = obj.preview === true;
+    const useCandidateUnion = obj.useCandidateUnion === true;
     const opts: PackOptions = {
       completedExclusiveContainerIndex:
         typeof obj.completedExclusiveContainerIndex === "number"
@@ -66,7 +74,13 @@ export async function POST(req: NextRequest) {
       return fail("계산할 화물이 없습니다", 400);
     }
 
-    const result = packBest(shipment.items, mode, opts);
+    // useCandidateUnion=true 일 때만 declared/physical 후보 union 시도. 기본은 기존 packBest.
+    const decisionMode: "packBest" | "candidateUnion" = useCandidateUnion
+      ? "candidateUnion"
+      : "packBest";
+    const result = useCandidateUnion
+      ? packBestWithCandidateUnion(shipment.items, mode, opts)
+      : packBest(shipment.items, mode, opts);
 
     // 미리보기면 DB 저장 안 함, planId 도 없음
     if (preview) {
@@ -81,6 +95,7 @@ export async function POST(req: NextRequest) {
           avgFillRate: result.summary.avgFillRate,
           unplacedCount: result.unplaced.length,
           warnings: result.summary.warnings,
+          decisionMode,
         },
       });
     }
@@ -97,6 +112,7 @@ export async function POST(req: NextRequest) {
         avgFillRate: saved.avgFillRate,
         unplacedCount: saved.unplacedCount,
         warnings: result.summary.warnings,
+        decisionMode,
       },
     });
   } catch (e: unknown) {

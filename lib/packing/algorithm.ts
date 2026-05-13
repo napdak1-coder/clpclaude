@@ -118,6 +118,42 @@ function cargoCbm(c: CargoSpec): number {
   return (c.width * c.length * c.height * c.quantity) / 1_000_000;
 }
 
+/**
+ * 컨테이너 셋 결정용 부피 추정 — 사용자 신고 우선 → ABOUT → 시스템 CBM 폴백.
+ *
+ * 우선순위:
+ *   1. excel-cfs / manual-cfs / distributed-cfs / legacy-cfs (= 사용자 신고 CFS 계열)
+ *   2. distributed-about (분배된 ABOUT 출처) → 같은 비교용으로 c.cbm 사용
+ *   3. c.aboutCbm > 0 (ABOUT 직접 입력값)
+ *   4. cargoCbm(c) (시스템 CBM, W×L×H×Q 또는 unitSizes 합)
+ *
+ * `calculated` 출처는 사용자 신고 아님 → 1번 통과 X, 2~4번 폴백.
+ *
+ * **호출처**: pack() 본문 `_dbgUserDeclaredTotalCbm` 합산 (2차-A, 2026-05-13).
+ * → `packBestWithCandidateUnion` 의 declared 후보 생성에 직접 영향.
+ * production 직접 호출 packBest 는 `attachDebug` 없어서 영향 X.
+ */
+function getDeclaredCbmForContainerDecision(c: CargoSpec): number {
+  const cfsLikeSources = new Set<string>([
+    "excel-cfs",
+    "manual-cfs",
+    "distributed-cfs",
+    "legacy-cfs",
+  ]);
+  const src = c.cbmSource ?? "legacy-cfs";
+  if (typeof c.cbm === "number" && c.cbm > 0 && cfsLikeSources.has(src)) {
+    return c.cbm;
+  }
+  // distributed-about 도 ABOUT 파생이므로 c.cbm 에 있을 수 있음 (forward compat)
+  if (src === "distributed-about" && typeof c.cbm === "number" && c.cbm > 0) {
+    return c.cbm;
+  }
+  if (typeof c.aboutCbm === "number" && c.aboutCbm > 0) {
+    return c.aboutCbm;
+  }
+  return cargoCbm(c);
+}
+
 /** cargo 총중량 헬퍼 — unitSizes 있으면 그룹별 합, 없으면 c.weightPerUnit (G.W/T) */
 function cargoTotalWeight(c: CargoSpec): number {
   if (c.unitSizes && c.unitSizes.length > 0) {
@@ -211,7 +247,13 @@ interface ClassifiedCargoes {
  *
  * REGULAR_TYPES / cargoType 은 화면 라벨/색 구분 등에만 사용.
  */
-function classify(cargoes: CargoSpec[]): ClassifiedCargoes {
+function classify(
+  cargoes: CargoSpec[],
+  opts?: { strictVisualClassification?: boolean },
+): ClassifiedCargoes {
+  // 1 cm 미만은 placeholder (DB CHECK 우회용) 로 간주 — 룰 1/2 공용 임계값.
+  const SIZE_MIN_CM = 1;
+
   // 룰 1 — Bulk shipment 감지:
   // 모든 화물이 c.cbm (CFS CBM) 을 입력했으면 = "전부 입고완료" 출하 케이스.
   // 실무자 분배는 input 순서대로 컨테이너 채움 + booking 묶음 보존이라 시각 적재
@@ -220,13 +262,43 @@ function classify(cargoes: CargoSpec[]): ClassifiedCargoes {
   // 단일 화물은 제외 (단건 시각 적재 의도 보호 — 기존 테스트 케이스 호환)
   const allHaveCbm =
     cargoes.length >= 2 && cargoes.every((c) => (c.cbm ?? 0) > 0);
+
+  // [진단 모드] strictVisualClassification=true 면 anyHasSize 가드 적용.
+  // 사이즈 입력된 행이 한 건이라도 있으면 룰 1 우회 → 룰 2 진입 → visual 트랙.
+  // production 기본 동작에는 영향 0 (옵션 default false).
   if (allHaveCbm) {
-    return { visualCargoes: [], ctCargoes: [...cargoes], completedCargoes: [] };
+    if (opts?.strictVisualClassification) {
+      const anyHasSize = cargoes.some(
+        (c) =>
+          (c.width >= SIZE_MIN_CM &&
+            c.length >= SIZE_MIN_CM &&
+            c.height >= SIZE_MIN_CM) ||
+          (c.unitSizes?.some(
+            (u) =>
+              u.width >= SIZE_MIN_CM &&
+              u.length >= SIZE_MIN_CM &&
+              u.height >= SIZE_MIN_CM,
+          ) ??
+            false),
+      );
+      if (!anyHasSize) {
+        return {
+          visualCargoes: [],
+          ctCargoes: [...cargoes],
+          completedCargoes: [],
+        };
+      }
+      // anyHasSize=true → 룰 1 우회, 룰 2 로 진입
+    } else {
+      return {
+        visualCargoes: [],
+        ctCargoes: [...cargoes],
+        completedCargoes: [],
+      };
+    }
   }
 
   // 룰 2 — 일반 케이스: 사이즈 있으면 시각, 없으면 CT 벌크.
-  // 1cm 미만은 placeholder (DB CHECK 우회용) 로 간주해 CT 로 라우팅.
-  const SIZE_MIN_CM = 1;
   const visualCargoes: CargoSpec[] = [];
   const ctCargoes: CargoSpec[] = [];
   for (const c of cargoes) {
@@ -615,6 +687,19 @@ export interface PackOptions {
    * production UI 노출 X.
    */
   attachDebug?: boolean;
+  /**
+   * **진단 전용 옵션 (production 기본 X).**
+   *
+   * true 면 classify 룰 1 (allHaveCbm → 전체 CT 벌크) 을 **anyHasSize=true 일 때 우회**.
+   * 즉 사이즈 입력된 행이 한 건이라도 있으면 룰 2 로 진입해서 visual 트랙으로 보낸다.
+   *
+   * 목적: "사이즈 있는 행은 visual 로 가야 한다" 사용자 룰 #4 를 강제 적용한 상태에서
+   * 실제 시각 배치 미해결 케이스를 진단. production route 영향 X — 진단 스크립트에서만 사용.
+   *
+   * 호환: 기존 호치민 TOTAL 같은 W/L/H = 0 + CFS CBM 만 있는 카톤 케이스는 anyHasSize=false
+   * 라서 옵션 켜져도 그대로 룰 1 발동 (CT 벌크).
+   */
+  strictVisualClassification?: boolean;
 }
 
 /** cm 단위 미세 좌표 비교 — extreme-point 내부 EPS 와 같은 수준이면 충분 */
@@ -1135,11 +1220,20 @@ export function pack(
   cargoes = distributeBookingValues(cargoes).cargoes;
 
   // 1) 분류
-  const { visualCargoes, ctCargoes, completedCargoes } = classify(cargoes);
+  const { visualCargoes, ctCargoes, completedCargoes } = classify(cargoes, {
+    strictVisualClassification: options?.strictVisualClassification,
+  });
 
   // [attachDebug] 분배 후 cargoes 기준 부피 3 값 캡쳐 (regression baseline 전용, production 영향 0)
+  // [2026-05-13 2차-A] declared 합은 getDeclaredCbmForContainerDecision(cbmSource 기반) 으로 계산.
+  //   - CFS 계열 (excel-cfs / manual-cfs / distributed-cfs / legacy-cfs) → c.cbm
+  //   - distributed-about → c.cbm
+  //   - 그 외에서 aboutCbm > 0 → aboutCbm
+  //   - 폴백 → cargoCbm(c) (system CBM)
+  // → calculated 만 채워진 행은 declared 합에서 system CBM 으로 계산 (사용자 신고 X)
+  //   packBestWithCandidateUnion 의 declared 후보 생성이 정확해진다.
   const _dbgUserDeclaredTotalCbm = options?.attachDebug
-    ? cargoes.reduce((s, c) => s + (c.cbm ?? c.aboutCbm ?? cargoCbm(c)), 0)
+    ? cargoes.reduce((s, c) => s + getDeclaredCbmForContainerDecision(c), 0)
     : 0;
   const _dbgPhysicalTotalCbm = options?.attachDebug
     ? cargoes.reduce((s, c) => s + cargoCbm(c), 0)

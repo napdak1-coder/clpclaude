@@ -9,6 +9,7 @@
 import { db } from "../db.ts";
 import {
   normalizeCargoType,
+  type CargoCbmSource,
   type CargoSpec,
   type CargoType,
   type Orientation,
@@ -38,6 +39,20 @@ function parseUnitSizes(raw: unknown): UnitSize[] | undefined {
       if (w < 0 || l < 0 || h < 0) continue;
       const ct = normalizeCargoType((o.cargoType ?? null) as unknown);
       const cbmVal = Number(o.cbm);
+      // cbmSource 파싱 — 5종 라벨만 허용, 그 외는 legacy-unit-cbm 폴백 (cbm 있을 때만).
+      const cbmSrcRaw =
+        typeof o.cbmSource === "string" ? (o.cbmSource as string) : null;
+      const validUnitSources = new Set([
+        "user",
+        "calculated",
+        "distributed-cfs",
+        "distributed-about",
+        "legacy-unit-cbm",
+      ]);
+      const cbmSource: UnitSize["cbmSource"] | undefined =
+        cbmSrcRaw && validUnitSources.has(cbmSrcRaw)
+          ? (cbmSrcRaw as UnitSize["cbmSource"])
+          : undefined;
       cleaned.push({
         width: w,
         length: l,
@@ -46,6 +61,10 @@ function parseUnitSizes(raw: unknown): UnitSize[] | undefined {
         weight: Number.isFinite(wt) && wt >= 0 ? wt : 0,
         ...(ct ? { cargoType: ct } : {}),
         ...(Number.isFinite(cbmVal) && cbmVal > 0 ? { cbm: cbmVal } : {}),
+        // cbm 있는데 cbmSource 누락이면 legacy-unit-cbm 폴백 (마이그레이션 호환).
+        ...(Number.isFinite(cbmVal) && cbmVal > 0
+          ? { cbmSource: cbmSource ?? "legacy-unit-cbm" }
+          : {}),
       });
     }
     return cleaned.length > 0 ? cleaned : undefined;
@@ -68,6 +87,7 @@ function serializeUnitSizes(arr: UnitSize[] | undefined | null): string | null {
         weight: number;
         cargoType?: UnitSize["cargoType"];
         cbm?: number;
+        cbmSource?: UnitSize["cbmSource"];
       } = {
         width: u.width,
         length: u.length,
@@ -80,6 +100,8 @@ function serializeUnitSizes(arr: UnitSize[] | undefined | null): string | null {
       if (u.cargoType) base.cargoType = u.cargoType;
       // 직접 입력 CBM — 주로 CT 박스 (사이즈 없는 카톤) 가 부피만 명시할 때 (2026-05-13 추가)
       if (typeof u.cbm === "number" && u.cbm > 0) base.cbm = u.cbm;
+      // cbmSource 출처 라벨 보존 (user / calculated / distributed-* / legacy-unit-cbm) — 2026-05-13 추가
+      if (u.cbmSource) base.cbmSource = u.cbmSource;
       return base;
     });
   return cleaned.length > 0 ? JSON.stringify(cleaned) : null;
@@ -152,6 +174,11 @@ export interface CargoItemInput {
   quantity: number;
   weightPerUnitKg: number;
   cbm?: number | null;
+  /**
+   * cbm 값의 출처 — 컨테이너 셋 결정·classify 분기용. 미설정 시 'legacy-cfs' 폴백.
+   * (2026-05-13 cbmSource 도입)
+   */
+  cbmSource?: CargoCbmSource | null;
   /** 엑셀 ABOUT 셀 값 — CFS CBM 과 별도 보존 (about_cbm 컬럼) */
   aboutCbm?: number | null;
   /** 단위별 사이즈 그룹 — 있으면 unit_sizes_json TEXT 컬럼으로 직렬화 저장 */
@@ -223,6 +250,23 @@ function rowToCargo(row: Record<string, unknown>): CargoSpec {
     orientationRaw === "fixed" || orientationRaw === "long_along_length"
       ? orientationRaw
       : "free";
+  const cbmVal = toNullableNumber(row.cbm) ?? undefined;
+  // cbm_source 컬럼 (0011 migration) — 라벨 6종만 허용, 그 외/누락은 legacy-cfs 폴백 (cbm 있을 때).
+  const cbmSrcRaw = toStringOrNull(row.cbm_source);
+  const validCargoSources = new Set([
+    "excel-cfs",
+    "manual-cfs",
+    "distributed-cfs",
+    "distributed-about",
+    "calculated",
+    "legacy-cfs",
+  ]);
+  const cbmSource: CargoSpec["cbmSource"] | undefined =
+    cbmSrcRaw && validCargoSources.has(cbmSrcRaw)
+      ? (cbmSrcRaw as CargoSpec["cbmSource"])
+      : cbmVal != null && cbmVal > 0
+        ? "legacy-cfs"
+        : undefined;
   return {
     id: toString(row.id),
     shipmentId: toString(row.shipment_id),
@@ -239,7 +283,8 @@ function rowToCargo(row: Record<string, unknown>): CargoSpec {
     height: toNumber(row.height_cm),
     quantity: toNumber(row.quantity),
     weightPerUnit: toNumber(row.weight_per_unit_kg),
-    cbm: toNullableNumber(row.cbm) ?? undefined,
+    cbm: cbmVal,
+    cbmSource,
     aboutCbm: toNullableNumber(row.about_cbm) ?? undefined,
     unitSizes: parseUnitSizes(row.unit_sizes_json),
     remarks: {
@@ -297,8 +342,8 @@ export async function createShipment(
           width_cm, length_cm, height_cm, quantity, weight_per_unit_kg, cbm,
           no_stacking, top_only, orientation, heavier_below, item_remark,
           unit_sizes_json, about_cbm, cargo_type, booking_no,
-          house_bl_no, destination
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          house_bl_no, destination, cbm_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         itemId,
@@ -324,6 +369,8 @@ export async function createShipment(
         item.bookingNo ?? null,
         item.houseBlNo ?? null,
         item.destination ?? null,
+        // cbm_source: cbm 있을 때 출처 라벨 보존, 없으면 NULL.
+        item.cbm != null && item.cbm > 0 ? (item.cbmSource ?? null) : null,
       ],
     };
   });
@@ -384,8 +431,8 @@ export async function updateShipment(
           width_cm, length_cm, height_cm, quantity, weight_per_unit_kg, cbm,
           no_stacking, top_only, orientation, heavier_below, item_remark,
           unit_sizes_json, about_cbm, cargo_type, booking_no,
-          house_bl_no, destination
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          house_bl_no, destination, cbm_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         itemId,
@@ -411,6 +458,7 @@ export async function updateShipment(
         item.bookingNo ?? null,
         item.houseBlNo ?? null,
         item.destination ?? null,
+        item.cbm != null && item.cbm > 0 ? (item.cbmSource ?? null) : null,
       ],
     };
   });

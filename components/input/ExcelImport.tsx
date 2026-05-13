@@ -264,6 +264,11 @@ function buildImportPayload(
           // 엑셀 CBM 과 ABOUT 을 별도로 파싱
           base.cbm = pickRowCbm(row, header);
           base.aboutCbm = pickRowAbout(row, parsed.headers, header);
+          // 엑셀 CFS CBM 셀에서 양수 파싱됐으면 출처 마킹 — 컨 셋 결정에서 사용자 신고로 취급.
+          // (2026-05-13 cbmSource 도입)
+          if (base.cbm != null && base.cbm > 0) {
+            base.cbmSource = "excel-cfs";
+          }
           break;
         }
         case "noStacking":
@@ -475,6 +480,12 @@ const SAMPLE_FILES: Array<{
     label: "4ST SG TOTAL",
     url: "/samples/singapore-total-4.xlsx",
     filename: "싱가폴 TOTAL 네번째.xlsx",
+  },
+  {
+    key: "singapore-total-5",
+    label: "5ST SG TOTAL",
+    url: "/samples/singapore-total-5.xlsx",
+    filename: "싱가폴 TOTAL 다섯번째.xlsx",
   },
   {
     key: "hochiminh-total",

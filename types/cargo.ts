@@ -61,6 +61,40 @@ export interface Remark {
 }
 
 /**
+ * CargoSpec.cbm 의 출처 라벨 — 컨테이너 셋 결정·classify 분기에서 출처 구분용.
+ *
+ * - excel-cfs        : 엑셀 "CFS CBM" 컬럼 셀에서 파싱 (사용자 신고)
+ * - manual-cfs       : 사용자가 메인 화물 표 "CFS CBM" 칸에 직접 입력 (사용자 신고)
+ * - distributed-cfs  : distributeBookingValues 가 같은 부킹 안 다른 CFS 행에서 분배해 채움
+ * - distributed-about: distributeBookingValues 가 같은 부킹 ABOUT 행에서 분배해 채움 (forward compat)
+ * - calculated       : UI 가 W×L×H×Q 박스 계산값으로 자동 채움 (CFS 와 별개)
+ * - legacy-cfs       : 기존 DB 의 라벨 없는 c.cbm — excel-cfs 와 동등 취급 (마이그레이션 폴백)
+ */
+export type CargoCbmSource =
+  | "excel-cfs"
+  | "manual-cfs"
+  | "distributed-cfs"
+  | "distributed-about"
+  | "calculated"
+  | "legacy-cfs";
+
+/**
+ * UnitSize.cbm 의 출처 라벨 — 사이즈 모달 입력·자동 분배 추적용.
+ *
+ * - user             : 사용자가 사이즈 모달 "그룹 총 CBM" 칸에 직접 입력
+ * - calculated       : 모달이 W×L×H×Q 박스 계산값으로 자동 채움
+ * - distributed-cfs  : 모달이 행 c.cbm 받아 그룹 수로 균등 분배 (사이즈 없는 행)
+ * - distributed-about: 모달이 행 aboutCbm 받아 그룹 수로 균등 분배
+ * - legacy-unit-cbm  : 기존 unit_sizes_json 의 라벨 없는 cbm — calculated 와 동등 취급
+ */
+export type UnitSizeCbmSource =
+  | "user"
+  | "calculated"
+  | "distributed-cfs"
+  | "distributed-about"
+  | "legacy-unit-cbm";
+
+/**
  * 단위 사이즈 그룹 — 한 행의 quantity 안에서 사이즈가 다른 화물이 섞여 있을 때
  * (예: 6개 중 4개는 162x107x66, 나머지 2개는 100x80x50) 그룹별로 표현.
  * 시스템 CBM = Σ (width * length * height * quantity) / 1_000_000
@@ -78,6 +112,12 @@ export interface UnitSize {
    * 없으면 박스 사이즈 W×L×H×Q 계산값으로 폴백.
    */
   cbm?: number;
+  /**
+   * 이 cbm 값의 출처. 사용자 직접 입력(`user`) / 자동 계산(`calculated`) /
+   * 행 cbm/aboutCbm 분배(`distributed-cfs`/`distributed-about`) 등 구분.
+   * 미설정 시 'legacy-unit-cbm' 폴백 (calculated 와 동등 취급).
+   */
+  cbmSource?: UnitSizeCbmSource;
   /**
    * 박스별 화물 종류 (선택). 미지정이면 cargo.cargoType 사용.
    * 같은 cargo 안에서 박스마다 다른 종류 (예: PL 2개 + CT 1개) 표현 가능.
@@ -111,6 +151,12 @@ export interface CargoSpec {
   weightPerUnit: number;         // 개당 중량 kg
   /** 엑셀 "CFS CBM" 셀에서 파싱했거나 사용자가 직접 입력한 CBM. 미입력은 undefined */
   cbm?: number;
+  /**
+   * 이 cbm 값의 출처 — 컨테이너 셋 결정·classify 분기에서 사용자 신고(`excel-cfs`/`manual-cfs`/
+   * `distributed-cfs`/`legacy-cfs`) vs 자동값(`calculated`/`distributed-about`) 구분용.
+   * 미설정 시 'legacy-cfs' 폴백 (excel-cfs 와 동등 취급).
+   */
+  cbmSource?: CargoCbmSource;
   /** 엑셀 ABOUT 셀에서 파싱한 값. CFS CBM 과 별도로 보존하며 시스템 CBM 비교의 폴백 소스로 사용. */
   aboutCbm?: number;
   /** 단위별 사이즈 묶음 — 있으면 시스템 CBM 계산에 사용 (없으면 대표 사이즈 + quantity) */

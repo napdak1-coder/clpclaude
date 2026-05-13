@@ -29,6 +29,13 @@ interface UnitSizesModalProps {
    * 새 그룹 생성 시 unit cbm = baseCbm / 그룹 수 로 자동 채움 (CT 박스가 사이즈 없이 부피만 명시하는 케이스).
    */
   baseCbm?: number;
+  /**
+   * baseCbm 값의 출처 — 자동 분배 결과의 cbmSource 결정용.
+   * - 'cfs'   : 행 c.cbm 에서 받음 → 자동 분배 unit.cbmSource='distributed-cfs'
+   * - 'about' : 행 aboutCbm 에서 받음 → 자동 분배 unit.cbmSource='distributed-about'
+   * - undefined : baseCbm 없거나 출처 불명 → unit.cbmSource='calculated' 폴백
+   */
+  baseCbmOrigin?: "cfs" | "about";
   initial?: UnitSize[];
   itemLabel?: string;
   onClose: () => void;
@@ -94,6 +101,15 @@ function defaultDraft(base: UnitSizesModalProps): DraftRow[] {
   // 행 수량(N) 만큼 qty=1 그룹을 자동 생성 — 사용자가 단위별로 다른 사이즈/무게 입력 용이.
   // 너무 많으면 가독성 떨어지므로 50 초과 시 단일 그룹(qty=N) 으로 폴백.
   const n = Math.max(1, base.baseQuantity || 1);
+  // 자동 분배 결과의 cbmSource — baseCbmOrigin 따라 결정 (사용자 결정 Q1 보존).
+  // 'cfs' 행에서 받은 baseCbm → 'distributed-cfs', 'about' 행 → 'distributed-about',
+  // 출처 불명 (baseCbmOrigin 없음) → 'calculated' 폴백.
+  const distributedSource: "distributed-cfs" | "distributed-about" | "calculated" =
+    base.baseCbmOrigin === "about"
+      ? "distributed-about"
+      : base.baseCbmOrigin === "cfs"
+        ? "distributed-cfs"
+        : "calculated";
   if (n > 50) {
     const grp: DraftRow = {
       rowKey: crypto.randomUUID(),
@@ -103,7 +119,10 @@ function defaultDraft(base: UnitSizesModalProps): DraftRow[] {
       quantity: n,
       weight: perUnit,
     };
-    if (baseCbm > 0) grp.cbm = Number(baseCbm.toFixed(4));
+    if (baseCbm > 0) {
+      grp.cbm = Number(baseCbm.toFixed(4));
+      grp.cbmSource = distributedSource;
+    }
     return [grp];
   }
   // 그룹 수가 여러 개일 때 행 cbm 을 균등 분배 (반올림 오차는 마지막 그룹에 흡수)
@@ -122,6 +141,7 @@ function defaultDraft(base: UnitSizesModalProps): DraftRow[] {
       const v =
         idx === n - 1 ? baseCbm - perGroupCbm * (n - 1) : perGroupCbm;
       grp.cbm = Number(v.toFixed(4));
+      grp.cbmSource = distributedSource;
     }
     return grp;
   });
@@ -217,7 +237,12 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
         // 이전엔 이 필드를 빠뜨려 사용자가 unit 별 cargoType 변경 후 저장이 손실됐음 (2026-05-13 수정).
         if (d.cargoType) u.cargoType = d.cargoType;
         // 직접 입력 CBM — 주로 CT 박스 (사이즈 없는 카톤) 가 부피만 명시할 때 (2026-05-13 추가)
-        if (typeof d.cbm === "number" && d.cbm > 0) u.cbm = d.cbm;
+        if (typeof d.cbm === "number" && d.cbm > 0) {
+          u.cbm = d.cbm;
+          // cbmSource 보존 (user / distributed-* / calculated 등 입력 흐름에서 마킹됨).
+          // 마킹 누락 시 'calculated' 폴백 — 사용자 신고 아님으로 보수적 처리.
+          u.cbmSource = d.cbmSource ?? "calculated";
+        }
         return u;
       });
     onSave(cleaned);
@@ -331,11 +356,12 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
                       onChange={(e) => {
                         const t = e.target.value;
                         const num = Number(t);
+                        const valid =
+                          t !== "" && Number.isFinite(num) && num > 0;
                         updateRow(d.rowKey, {
-                          cbm:
-                            t === "" || !Number.isFinite(num) || num <= 0
-                              ? undefined
-                              : num,
+                          cbm: valid ? num : undefined,
+                          // 사용자가 직접 타이핑 → 'user' 마킹. 자동 분배·계산 폴백과 구분.
+                          cbmSource: valid ? "user" : undefined,
                         });
                       }}
                       title="직접 입력 우선 (주로 CT 박스). 비우면 W×L×H×수량 계산값 사용."

@@ -10,7 +10,14 @@
  */
 
 import { Fragment, useMemo, useState } from "react";
-import type { CargoSpec, CargoType, Orientation, Remark, UnitSize } from "@/types/cargo";
+import type {
+  CargoCbmSource,
+  CargoSpec,
+  CargoType,
+  Orientation,
+  Remark,
+  UnitSize,
+} from "@/types/cargo";
 import { CARGO_TYPES, calcSystemCbm, DEFAULT_REMARK } from "@/types/cargo";
 import { distributeBookingValues, type DistributedField } from "@/lib/distribute-booking-values";
 import { correctInflatedUnitWeights } from "@/lib/excel";
@@ -45,6 +52,12 @@ export interface CargoRow {
   weightPerUnitKg: number;
   /** 엑셀 "CFS CBM" 셀 또는 사용자 직접 입력 CBM. 미입력은 null */
   cbm: number | null;
+  /**
+   * 이 cbm 값의 출처 — UI 표시 + 알고리즘 분기용. 미설정 시 'legacy-cfs' 폴백.
+   * - excel-cfs / manual-cfs / distributed-cfs / legacy-cfs : 사용자 신고 계열
+   * - calculated / distributed-about : 자동값
+   */
+  cbmSource?: CargoCbmSource;
   /** 엑셀 ABOUT 셀에서 파싱한 값. CFS CBM 비어있을 때 비교 폴백 */
   aboutCbm: number | null;
   /** 단위별 사이즈 그룹 (없거나 길이 0이면 시스템 CBM 은 대표 사이즈 사용) */
@@ -652,12 +665,14 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                         onChange={(e) => {
                           const t = e.target.value;
                           if (t === "") {
-                            updateRow(r.rowKey, { cbm: null });
+                            updateRow(r.rowKey, { cbm: null, cbmSource: undefined });
                             return;
                           }
                           const num = Number(t);
+                          const valid = Number.isFinite(num) && num > 0;
                           updateRow(r.rowKey, {
                             cbm: Number.isFinite(num) ? num : null,
+                            cbmSource: valid ? "manual-cfs" : undefined,
                           });
                         }}
                         className={`block w-full min-w-0 rounded border px-0.5 py-0 text-right text-[11px] leading-tight ${
@@ -887,6 +902,17 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                 : isDistributed(sizeModalRow.rowKey, "aboutCbm")
                   ? (distributedValue(sizeModalRow.rowKey, "aboutCbm") ?? undefined)
                   : (sizeModalRow.cbm ?? sizeModalRow.aboutCbm ?? undefined))
+            : undefined
+        }
+        baseCbmOrigin={
+          sizeModalRow
+            ? (isDistributed(sizeModalRow.rowKey, "cbm") ||
+              (sizeModalRow.cbm != null && sizeModalRow.cbm > 0)
+                ? "cfs"
+                : isDistributed(sizeModalRow.rowKey, "aboutCbm") ||
+                  (sizeModalRow.aboutCbm != null && sizeModalRow.aboutCbm > 0)
+                  ? "about"
+                  : undefined)
             : undefined
         }
         initial={sizeModalRow?.unitSizes}

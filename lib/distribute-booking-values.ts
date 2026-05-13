@@ -15,7 +15,7 @@
  *   - bookingNo 가 비어 있으면 분배 대상 X (그룹 식별 불가)
  */
 
-import type { CargoSpec } from "../types/cargo.ts";
+import type { CargoCbmSource, CargoSpec } from "../types/cargo.ts";
 
 export type DistributedField = "cbm" | "aboutCbm" | "weightPerUnit";
 
@@ -78,9 +78,26 @@ export function distributeBookingValues(
       // 정확히 1개 행만 값 있음 → 분배
       if (filled.length === 1 && updated.length > 1) {
         const total = filled[0][field] as number;
+        // cbm 필드 분배 시 원본 출처를 보존해 distributed-cfs/distributed-about 으로 마킹.
+        // (사용자 결정 Q1 — 원본이 CFS 계열이면 distributed-cfs, ABOUT 계열이면 distributed-about)
+        let distributedCbmSource: CargoCbmSource | null = null;
+        if (field === "cbm") {
+          const originSource = (filled[0] as CargoSpec).cbmSource;
+          // CFS 계열 (excel-cfs / manual-cfs / distributed-cfs / legacy-cfs / undefined)
+          // → distributed-cfs. 그 외 (calculated / distributed-about) 도 보수적으로 distributed-cfs
+          // (원본이 c.cbm 에 있다는 것 자체가 사용자 신고 흐름의 일부).
+          distributedCbmSource = "distributed-cfs";
+          // forward compat: 명시 origin 이 distributed-about 또는 calculated 면 그 출처 보존
+          if (originSource === "distributed-about") {
+            distributedCbmSource = "distributed-about";
+          }
+        }
         for (const c of updated) {
           const ratio = (c.quantity ?? 0) / totalQty;
           (c as Record<string, unknown>)[field] = total * ratio;
+          if (field === "cbm" && distributedCbmSource) {
+            (c as Record<string, unknown>).cbmSource = distributedCbmSource;
+          }
           // 분배 표시
           const set = distributedFields.get(c.id) ?? new Set<DistributedField>();
           set.add(field);
