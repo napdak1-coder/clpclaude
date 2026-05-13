@@ -86,13 +86,9 @@ function defaultDraft(base: UnitSizesModalProps): DraftRow[] {
         base.initial,
       ) ?? base.initial;
     return corrected.map((u) => {
-      // baseWeight 직접 폴백 (분배된 단위당 무게 우선)
-      const draft = makeDraft(u, base.baseWeight ?? 0);
-      // 보조 — 그래도 0이면 perUnit (행 합 ÷ 수량) 폴백
-      if ((!draft.weight || draft.weight <= 0) && perUnit > 0) {
-        draft.weight = perUnit;
-      }
-      return draft;
+      // unit weight 가 0 이면 perUnit (박스 1개 무게 = 행 총 무게 / 수량) 폴백.
+      // 이전엔 baseWeight(행 총 무게) 를 직접 폴백해 박스 1개 무게가 행 총 무게로 잘못 설정됨 (2026-05-13 수정).
+      return makeDraft(u, perUnit);
     });
   }
   // 행 수량(N) 만큼 qty=1 그룹을 자동 생성 — 사용자가 단위별로 다른 사이즈/무게 입력 용이.
@@ -191,6 +187,13 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
     baseWeight && baseWeight > 0
       ? Math.abs(totalWeight - baseWeight) > 0.5
       : false;
+  // 행 기준 CBM(cfs/about, props.baseCbm) 과 단위 CBM 합 일치 확인 (오차 0.01 m³)
+  const cbmDiffAbs =
+    props.baseCbm && props.baseCbm > 0
+      ? Math.abs(totalCbm - props.baseCbm)
+      : 0;
+  const cbmMismatch =
+    props.baseCbm && props.baseCbm > 0 ? cbmDiffAbs > 0.01 : false;
 
   const handleSave = () => {
     const cleaned: UnitSize[] = drafts
@@ -219,6 +222,13 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
       });
     onSave(cleaned);
     onClose();
+  };
+
+  /** 행 무게 균등 분배 — 모든 unit weight 를 perUnit (= baseWeight / baseQuantity) 로 일괄 설정 */
+  const handleEvenWeightDistribute = () => {
+    if (!baseWeight || baseWeight <= 0 || baseQuantity <= 0) return;
+    const perUnit = Number((baseWeight / baseQuantity).toFixed(3));
+    setDrafts((prev) => prev.map((d) => ({ ...d, weight: perUnit })));
   };
 
   const handleClear = () => {
@@ -371,7 +381,24 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
               )}
             </span>
             <span>
-              시스템 CBM <b className="text-neutral-900">{totalCbm.toFixed(4)}</b> m³
+              시스템 CBM{" "}
+              <b className={cbmMismatch ? "text-red-600" : "text-neutral-900"}>
+                {totalCbm.toFixed(4)}
+              </b>{" "}
+              m³
+              {props.baseCbm != null && props.baseCbm > 0 && (
+                <>
+                  &nbsp;/&nbsp;행 기준 CBM{" "}
+                  <b className="text-neutral-900">{props.baseCbm.toFixed(4)}</b> m³
+                  {cbmMismatch ? (
+                    <span className="ml-1 text-red-600">
+                      ⚠ 불일치 (Δ {(totalCbm - props.baseCbm).toFixed(3)} m³)
+                    </span>
+                  ) : (
+                    <span className="ml-1 text-emerald-600">✅ 일치</span>
+                  )}
+                </>
+              )}
               {totalWeight > 0 && (
                 <>
                   &nbsp;·&nbsp;총 무게{" "}
@@ -394,6 +421,15 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
             </span>
           </div>
           <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleEvenWeightDistribute}
+              disabled={!baseWeight || baseWeight <= 0 || baseQuantity <= 0}
+              className="rounded border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+              title={`모든 unit 무게를 행 총 무게 / 수량 = ${baseWeight && baseQuantity ? (baseWeight / baseQuantity).toFixed(3) : "—"} kg 으로 일괄 설정`}
+            >
+              무게 균등 분배
+            </button>
             <button
               type="button"
               onClick={handleClear}

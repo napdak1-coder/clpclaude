@@ -13,6 +13,7 @@ import { Fragment, useMemo, useState } from "react";
 import type { CargoSpec, CargoType, Orientation, Remark, UnitSize } from "@/types/cargo";
 import { CARGO_TYPES, calcSystemCbm, DEFAULT_REMARK } from "@/types/cargo";
 import { distributeBookingValues, type DistributedField } from "@/lib/distribute-booking-values";
+import { correctInflatedUnitWeights } from "@/lib/excel";
 import { RemarksEditor } from "./RemarksEditor";
 import { UnitSizesModal } from "./UnitSizesModal";
 
@@ -99,9 +100,72 @@ function rowSystemCbm(r: CargoRow): number {
   return Number.isFinite(v) ? v : 0;
 }
 
+/**
+ * unit weight 합 계산 — UnitSizesModal defaultDraft 와 같은 보정 적용.
+ * 1. correctInflatedUnitWeights (모든 unit weight == rowWt 케이스 분배)
+ * 2. 그래도 unit weight 가 0/누락이면 perUnit (= rowWt / quantity) 폴백
+ */
+function computeEffectiveUnitWeightSum(r: CargoRow, rowWt: number): number {
+  if (!r.unitSizes || r.unitSizes.length === 0) return 0;
+  const corrected =
+    correctInflatedUnitWeights(
+      { quantity: r.quantity, weightPerUnitKg: rowWt },
+      r.unitSizes,
+    ) ?? r.unitSizes;
+  const perUnit = r.quantity > 0 ? rowWt / r.quantity : 0;
+  return corrected.reduce((s, u) => {
+    const w = u.weight && u.weight > 0 ? u.weight : perUnit;
+    return s + w * (u.quantity ?? 1);
+  }, 0);
+}
+
+/**
+ * 무게 분배 불일치 검출 — raw OR distribute 후 둘 중 하나 일치면 mismatch X.
+ *
+ * 두 가지 케이스 모두 일치로 처리:
+ * - raw 행 무게 == raw unit 합 (예: DSR 행 1 — raw 6238 vs 693.111×9=6238)
+ * - distribute 후 행 무게 == raw unit 합 (예: 지브이 8 — raw 4400 분배 후 20.56 vs unit 20.561)
+ *
+ * 둘 다 차이 100kg + 5% 초과면 결함.
+ *
+ * @param effRowWeight distribute 적용 후 행 무게 (없으면 raw)
+ */
+function isWeightMismatch(r: CargoRow, effRowWeight?: number): boolean {
+  if (!r.unitSizes || r.unitSizes.length === 0) return false;
+  const rawRowWt = r.weightPerUnitKg;
+  // raw 기준 일치 검사
+  if (rawRowWt > 0) {
+    const unitWtSumRaw = computeEffectiveUnitWeightSum(r, rawRowWt);
+    const dRaw = Math.abs(unitWtSumRaw - rawRowWt);
+    if (dRaw <= 100 || dRaw / rawRowWt <= 0.05) return false;
+  }
+  // distribute 후 기준 일치 검사
+  const effWt = effRowWeight ?? rawRowWt;
+  if (!effWt || effWt <= 0) return false;
+  const unitWtSumEff = computeEffectiveUnitWeightSum(r, effWt);
+  const dEff = Math.abs(unitWtSumEff - effWt);
+  return dEff > 100 && dEff / effWt > 0.05;
+}
+
+/**
+ * CBM 분배 불일치 검출 — 시각 적재 화물 (PL/WB/WC/WD/CR/CL) 만 검사.
+ * CT / PK (카톤류 — 보통 사이즈 안 적힌 채 부피만 합산) 는 사이즈 불일치 의미 X → 검사 제외.
+ * 시스템 cbm 과 행 cbm/about 차이가 0.01 m³ 초과면 결함.
+ *
+ * @param effRowCbm distribute 적용 후 행 cbm (없으면 raw r.cbm ?? r.aboutCbm)
+ */
+function isCbmMismatch(r: CargoRow, effRowCbm?: number | null): boolean {
+  if (r.cargoType === "CT" || r.cargoType === "PK") return false;
+  const referenceCbm =
+    effRowCbm != null ? effRowCbm : (r.cbm ?? r.aboutCbm ?? null);
+  if (referenceCbm == null || referenceCbm <= 0) return false;
+  return Math.abs(rowSystemCbm(r) - referenceCbm) > 0.01;
+}
+
 export function CargoTable({ rows, onChange }: CargoTableProps) {
   const [sizeModalRowKey, setSizeModalRowKey] = useState<string | null>(null);
   const [hideShippers, setHideShippers] = useState(false);
+  const [mismatchFilter, setMismatchFilter] = useState<"all" | "weight" | "cbm">("all");
   const sizeModalRow = rows.find((r) => r.rowKey === sizeModalRowKey) ?? null;
 
   // 부킹 단위 자동 분배 정보 — 같은 booking + 같은 화주 안에서 한 행에만 무게/CBM 몰려있으면
@@ -148,6 +212,27 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
     if (!v) return undefined;
     return v[field];
   };
+
+  // distribute 적용 후 실제 행 값 — 부킹 자동 분배·correct 보정 후 비교 (raw 거짓 양성 제거)
+  const effRowWeight = (r: CargoRow): number =>
+    isDistributed(r.rowKey, "weightPerUnit")
+      ? (distributedValue(r.rowKey, "weightPerUnit") ?? r.weightPerUnitKg)
+      : r.weightPerUnitKg;
+  const effRowCbm = (r: CargoRow): number | null => {
+    if (isDistributed(r.rowKey, "cbm"))
+      return distributedValue(r.rowKey, "cbm") ?? null;
+    if (r.cbm != null && r.cbm > 0) return r.cbm;
+    if (isDistributed(r.rowKey, "aboutCbm"))
+      return distributedValue(r.rowKey, "aboutCbm") ?? null;
+    return r.aboutCbm ?? null;
+  };
+  const checkWeightMismatch = (r: CargoRow): boolean =>
+    isWeightMismatch(r, effRowWeight(r));
+  const checkCbmMismatch = (r: CargoRow): boolean =>
+    isCbmMismatch(r, effRowCbm(r));
+  // 불일치 행 카운트 — 헤더 버튼 표시용
+  const weightMismatchCount = rows.filter(checkWeightMismatch).length;
+  const cbmMismatchCount = rows.filter(checkCbmMismatch).length;
 
   const updateRow = (rowKey: string, patch: Partial<CargoRow>) => {
     onChange(
@@ -235,6 +320,50 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
           {hideShippers ? "👁 화주 다시 보기" : "🙈 화주 숨기기"}
         </button>
       </div>
+      {/* 불일치 필터 — 무게/CBM 분배 안 맞는 행만 보기 (2026-05-13 추가) */}
+      <div className="mb-1 flex items-center gap-1 text-[11px]">
+        <button
+          type="button"
+          onClick={() => setMismatchFilter("all")}
+          className={`rounded border px-2 py-0.5 leading-tight ${
+            mismatchFilter === "all"
+              ? "border-neutral-700 bg-neutral-800 text-white"
+              : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100"
+          }`}
+        >
+          전체 목록 보기 ({rows.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setMismatchFilter("weight")}
+          disabled={weightMismatchCount === 0}
+          className={`rounded border px-2 py-0.5 leading-tight ${
+            mismatchFilter === "weight"
+              ? "border-red-700 bg-red-600 text-white"
+              : weightMismatchCount > 0
+                ? "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+                : "border-neutral-200 bg-neutral-50 text-neutral-400"
+          }`}
+          title="unit 무게 합과 행 무게 차이 큰 행 (100kg + 5% 초과)"
+        >
+          무게 불일치 {weightMismatchCount}
+        </button>
+        <button
+          type="button"
+          onClick={() => setMismatchFilter("cbm")}
+          disabled={cbmMismatchCount === 0}
+          className={`rounded border px-2 py-0.5 leading-tight ${
+            mismatchFilter === "cbm"
+              ? "border-amber-700 bg-amber-600 text-white"
+              : cbmMismatchCount > 0
+                ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                : "border-neutral-200 bg-neutral-50 text-neutral-400"
+          }`}
+          title="시스템 CBM 과 행 CBM/ABOUT 차이 0.01 m³ 초과 행"
+        >
+          CBM 불일치 {cbmMismatchCount}
+        </button>
+      </div>
       <table className="w-full table-fixed text-xs">
         <colgroup>
           {colWidths.map((w, i) => (
@@ -276,7 +405,22 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
               </td>
             </tr>
           ) : (
-            rows.map((r, idx) => {
+            rows
+              .filter((r) => {
+                if (mismatchFilter === "all") return true;
+                const predicate =
+                  mismatchFilter === "weight"
+                    ? checkWeightMismatch
+                    : checkCbmMismatch;
+                // 본인이 불일치면 표시
+                if (predicate(r)) return true;
+                // 같은 booking 안 다른 행이 불일치하면 같이 표시 (부킹 단위 분배 보정 편의)
+                if (!r.bookingNo) return false;
+                return rows.some(
+                  (other) => other.bookingNo === r.bookingNo && predicate(other),
+                );
+              })
+              .map((r, idx) => {
               const remark: Remark = {
                 noStacking: r.noStacking,
                 topOnly: r.topOnly,
@@ -286,24 +430,23 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
               };
               const sysCbm = rowSystemCbm(r);
               const hasUnitSizes = !!r.unitSizes && r.unitSizes.length > 0;
-              // 시스템 CBM 비교 기준: 엑셀 CBM 우선, 없으면 ABOUT
-              const referenceCbm = r.cbm ?? r.aboutCbm ?? null;
+              // 시스템 CBM 비교 기준: distribute 적용 후 실제 값 (raw 거짓 양성 제거)
+              const referenceCbm = effRowCbm(r);
               const cbmDiff =
                 referenceCbm != null ? Math.abs(sysCbm - referenceCbm) : null;
-              const cbmMismatch = cbmDiff != null && cbmDiff > 0.01;
-              // unitSizes 무게 분배 불일치 — 행 weightPerUnitKg vs unit.weight × qty 합.
-              // 차이 5% 또는 절대 100kg 초과면 사용자 확인 필요 (분배 오류 가능).
-              let weightMismatch = false;
-              if (hasUnitSizes && r.weightPerUnitKg > 0) {
-                const unitWtSum = (r.unitSizes ?? []).reduce(
-                  (s, u) => s + (u.weight ?? 0) * (u.quantity ?? 1),
-                  0,
-                );
-                const dWt = Math.abs(unitWtSum - r.weightPerUnitKg);
-                weightMismatch = dWt > 100 && dWt / r.weightPerUnitKg > 0.05;
-              }
+              const cbmMismatch = checkCbmMismatch(r);
+              // unitSizes 무게 분배 불일치 — distribute + correct 적용 후 비교
+              const weightMismatch = checkWeightMismatch(r);
               // 불일치 행 깜박임 — 사용자가 한눈에 확인하도록 시각 강조 (2026-05-13 추가)
               const rowBlink = cbmMismatch || weightMismatch;
+              // 불일치 안내용 정확한 차이 값 — isWeightMismatch 와 같은 raw 기준 비교
+              // (distribute 분배 후 값은 사용자 보정 결과라 검사 무관, 표시도 raw 로 통일)
+              const rawWt = r.weightPerUnitKg;
+              const unitWtSum = hasUnitSizes
+                ? computeEffectiveUnitWeightSum(r, rawWt)
+                : 0;
+              const dWt = unitWtSum - rawWt;
+              const dCbm = referenceCbm != null ? sysCbm - referenceCbm : 0;
               return (
                 <Fragment key={r.rowKey}>
                 <tr
@@ -605,20 +748,49 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                       )}
                     </div>
                   </td>
-                  {/* 사이즈 버튼 */}
+                  {/* 사이즈 버튼 — hover 시 무게/CBM 불일치 상세 차이 표시 */}
                   <td className="px-0 py-0.5 text-center">
-                    <button
-                      type="button"
-                      onClick={() => setSizeModalRowKey(r.rowKey)}
-                      className={`rounded border px-0.5 py-0 text-[11px] leading-none ${
-                        hasUnitSizes
+                    {(() => {
+                      // 사이즈 버튼 hover 툴팁 — 불일치 항목별 정확한 차이 값 동적 생성
+                      let tooltipParts: string[] = [];
+                      if (weightMismatch && r.unitSizes) {
+                        const unitWtSum = r.unitSizes.reduce(
+                          (s, u) => s + (u.weight ?? 0) * (u.quantity ?? 1),
+                          0,
+                        );
+                        const dWt = unitWtSum - r.weightPerUnitKg;
+                        tooltipParts.push(
+                          `무게 불일치 — 행 ${r.weightPerUnitKg.toFixed(0)}kg vs 단위합 ${unitWtSum.toFixed(0)}kg (Δ ${dWt > 0 ? "+" : ""}${dWt.toFixed(0)} kg)`,
+                        );
+                      }
+                      if (cbmMismatch && cbmDiff != null) {
+                        const dCbm = sysCbm - (referenceCbm ?? 0);
+                        tooltipParts.push(
+                          `CBM 불일치 — 시스템 ${sysCbm.toFixed(3)} vs 행 ${(referenceCbm ?? 0).toFixed(3)} (Δ ${dCbm > 0 ? "+" : ""}${dCbm.toFixed(3)} m³)`,
+                        );
+                      }
+                      const sizeTitle =
+                        tooltipParts.length > 0
+                          ? `[확인 필요]\n${tooltipParts.join("\n")}\n클릭하면 사이즈 모달 열림`
+                          : hasUnitSizes
+                            ? "다 일치 — 사이즈 모달 열기"
+                            : "단위별 사이즈 입력";
+                      const btnCls = rowBlink
+                        ? "border-red-400 bg-red-100 text-red-800 font-bold hover:bg-red-200"
+                        : hasUnitSizes
                           ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                          : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
-                      }`}
-                      title="단위별 사이즈 입력"
-                    >
-                      사이즈
-                    </button>
+                          : "border-neutral-300 text-neutral-700 hover:bg-neutral-50";
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setSizeModalRowKey(r.rowKey)}
+                          className={`rounded border px-0.5 py-0 text-[11px] leading-none ${btnCls}`}
+                          title={sizeTitle}
+                        >
+                          {rowBlink ? "⚠ 사이즈" : "사이즈"}
+                        </button>
+                      );
+                    })()}
                   </td>
                   <td className="px-0 py-0.5">
                     <RemarksEditor
@@ -649,6 +821,33 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                     </button>
                   </td>
                 </tr>
+                {rowBlink && (
+                  <tr className="border-b border-red-200 bg-red-50">
+                    <td className="px-1 py-0.5"></td>
+                    <td colSpan={19} className="px-1 py-0.5 text-[10px] text-red-700 leading-tight">
+                      ⚠ 확인 필요
+                      {weightMismatch && (
+                        <>
+                          {" · "}
+                          <b>무게</b> 행 {rawWt.toFixed(1)} · 단위합{" "}
+                          {unitWtSum.toFixed(1)} (Δ {dWt > 0 ? "+" : ""}
+                          {dWt.toFixed(1)})
+                        </>
+                      )}
+                      {cbmMismatch && (
+                        <>
+                          {" · CFS CBM "}
+                          {(r.cbm ?? 0).toFixed(3)}
+                          {" · ABOUT "}
+                          {(r.aboutCbm ?? 0).toFixed(3)}
+                          {" · 시스템 CBM "}
+                          {sysCbm.toFixed(3)} (Δ {dCbm > 0 ? "+" : ""}
+                          {dCbm.toFixed(3)})
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )}
                 </Fragment>
               );
             })
