@@ -4,6 +4,7 @@
 
 import type { ContainerSpec } from "./container";
 import type { CargoType, Remark } from "./cargo";
+import type { CLPDebugInfo } from "./clp-debug.ts";
 
 export interface PlacedCargo {
   cargoId: string;               // CargoSpec.id
@@ -173,4 +174,10 @@ export interface CLPResult {
     /** 사용자에게 표시할 경고/안내 메시지 (한도 초과 분산 등) */
     warnings: string[];
   };
+  /**
+   * regression baseline 측정용 디버그 envelope.
+   * packBest `options.attachDebug === true` 일 때만 부착. 그 외에는 undefined.
+   * production UI 노출 X.
+   */
+  debug?: CLPDebugInfo;
 }

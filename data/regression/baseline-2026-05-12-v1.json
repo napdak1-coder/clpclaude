@@ -1,0 +1,540 @@
+{
+  "schemaVersion": "1.0.0",
+  "dataVersion": "2026-05-12-v1",
+  "algorithmVersion": "rule-g-precluster + attachDebug (d6787fc+)",
+  "generatedAt": "2026-05-12T11:36:33.701Z",
+  "git": {
+    "commit": "d6787fc",
+    "branch": "master"
+  },
+  "host": {
+    "node": "v24.14.1",
+    "platform": "win32"
+  },
+  "ruleSetSnapshot": {
+    "decideContainers": "safety buffer 제거 상태",
+    "ruleG": "사전 묶음 승격 (bc07383)",
+    "candidateUnion": "미적용 (baseline 시점)"
+  },
+  "thresholds": {
+    "cbmDiffAbs": 0.3,
+    "cbmDiffRel": 0.01,
+    "packTimeWarnRatio": 1.5,
+    "candidateMaxRunMs": 60000
+  },
+  "samples": [
+    {
+      "sampleId": "sg-mangjak",
+      "sampleName": "망작 SG",
+      "sampleFile": "data/samples/singapore-mangjak-total.json",
+      "inputFileHash": "sha256:ffaacb1fbf309aae",
+      "expectedStatus": "PASS",
+      "mode": "auto",
+      "inputCargoRowCount": 21,
+      "inputUnitTotalCount": 220,
+      "inputTotalWeightKg": 247266.9,
+      "lightModeUsed": false,
+      "containerSet": [
+        "40FT",
+        "20FT"
+      ],
+      "containerCount": 2,
+      "containerCapacityCbmList": [
+        60,
+        28
+      ],
+      "totalCapacityCbm": 88,
+      "cbmBasis": "physical",
+      "userOverride": false,
+      "placedCount": 220,
+      "unplacedCount": 0,
+      "unplacedCargoIds": [],
+      "cargoIdSplitCount": 0,
+      "bookingSplitCount": 0,
+      "hardViolationCount": 0,
+      "cbmOverflowCount": 1,
+      "weightOverflowCount": 0,
+      "strictAuditPass": true,
+      "userDeclaredTotalCbm": 60.03,
+      "physicalTotalCbm": 49.9,
+      "legacyDecisionTotalCbm": 60.03,
+      "decidedVsRunnerUpDeltaCbm": 0,
+      "candidatesEvaluated": [
+        {
+          "status": "valid",
+          "types": [
+            "40FT",
+            "20FT"
+          ],
+          "capacity": 88,
+          "basis": "physical",
+          "stage": "fullMode",
+          "packTimeMs": 0
+        }
+      ],
+      "practitionerMismatchCount": null,
+      "practitionerMismatchSource": "none",
+      "packTimeMs": 0,
+      "packTimeMedianOf3": 0,
+      "wallClockMs": 9,
+      "notes": "결정: physical"
+    },
+    {
+      "sampleId": "sg-1",
+      "sampleName": "1ST SG TOTAL",
+      "sampleFile": "data/samples/singapore-total.json",
+      "inputFileHash": "sha256:94e082bd7b98a435",
+      "expectedStatus": "KNOWN_MISMATCH",
+      "mode": "auto",
+      "inputCargoRowCount": 22,
+      "inputUnitTotalCount": 54,
+      "inputTotalWeightKg": 48411.9,
+      "lightModeUsed": false,
+      "containerSet": [
+        "40FT",
+        "20FT"
+      ],
+      "containerCount": 2,
+      "containerCapacityCbmList": [
+        60,
+        28
+      ],
+      "totalCapacityCbm": 88,
+      "cbmBasis": "physical",
+      "userOverride": false,
+      "placedCount": 54,
+      "unplacedCount": 0,
+      "unplacedCargoIds": [],
+      "cargoIdSplitCount": 0,
+      "bookingSplitCount": 0,
+      "hardViolationCount": 0,
+      "cbmOverflowCount": 0,
+      "weightOverflowCount": 0,
+      "strictAuditPass": true,
+      "userDeclaredTotalCbm": 73.78,
+      "physicalTotalCbm": 73.77,
+      "legacyDecisionTotalCbm": 73.77,
+      "decidedVsRunnerUpDeltaCbm": 0,
+      "candidatesEvaluated": [
+        {
+          "status": "valid",
+          "types": [
+            "40FT",
+            "20FT"
+          ],
+          "capacity": 88,
+          "basis": "physical",
+          "stage": "fullMode",
+          "packTimeMs": 46594
+        }
+      ],
+      "practitionerMismatchCount": 8,
+      "practitionerMismatchSource": "verify-script",
+      "packTimeMs": 46594,
+      "packTimeMedianOf3": 46693,
+      "wallClockMs": 185377,
+      "notes": "실무자 8건 차이 · 결정: physical"
+    },
+    {
+      "sampleId": "sg-2",
+      "sampleName": "2ST SG TOTAL",
+      "sampleFile": "data/samples/singapore-total-2.json",
+      "inputFileHash": "sha256:cffc64935d9cb293",
+      "expectedStatus": "PASS",
+      "mode": "auto",
+      "inputCargoRowCount": 23,
+      "inputUnitTotalCount": 136,
+      "inputTotalWeightKg": 107501.69900000001,
+      "lightModeUsed": false,
+      "containerSet": [
+        "40FT",
+        "40FT"
+      ],
+      "containerCount": 2,
+      "containerCapacityCbmList": [
+        60,
+        60
+      ],
+      "totalCapacityCbm": 120,
+      "cbmBasis": "physical",
+      "userOverride": true,
+      "placedCount": 136,
+      "unplacedCount": 0,
+      "unplacedCargoIds": [],
+      "cargoIdSplitCount": 0,
+      "bookingSplitCount": 0,
+      "hardViolationCount": 0,
+      "cbmOverflowCount": 0,
+      "weightOverflowCount": 0,
+      "strictAuditPass": true,
+      "userDeclaredTotalCbm": 88.75,
+      "physicalTotalCbm": 81.09,
+      "legacyDecisionTotalCbm": 88.64,
+      "decidedVsRunnerUpDeltaCbm": 0,
+      "candidatesEvaluated": [
+        {
+          "status": "valid",
+          "types": [
+            "40FT",
+            "40FT"
+          ],
+          "capacity": 120,
+          "basis": "physical",
+          "stage": "fullMode",
+          "packTimeMs": 55
+        }
+      ],
+      "practitionerMismatchCount": 0,
+      "practitionerMismatchSource": "verify-script",
+      "packTimeMs": 55,
+      "packTimeMedianOf3": 55,
+      "wallClockMs": 223,
+      "notes": "결정: physical"
+    },
+    {
+      "sampleId": "sg-3",
+      "sampleName": "3ST SG TOTAL",
+      "sampleFile": "data/samples/singapore-total-3.json",
+      "inputFileHash": "sha256:ead7c1b2096e5e9d",
+      "expectedStatus": "KNOWN_MISMATCH",
+      "mode": "auto",
+      "inputCargoRowCount": 35,
+      "inputUnitTotalCount": 80,
+      "inputTotalWeightKg": 33667.490999999995,
+      "lightModeUsed": false,
+      "containerSet": [
+        "40FT",
+        "40FT"
+      ],
+      "containerCount": 2,
+      "containerCapacityCbmList": [
+        60,
+        60
+      ],
+      "totalCapacityCbm": 120,
+      "cbmBasis": "physical",
+      "userOverride": false,
+      "placedCount": 80,
+      "unplacedCount": 0,
+      "unplacedCargoIds": [],
+      "cargoIdSplitCount": 0,
+      "bookingSplitCount": 0,
+      "hardViolationCount": 0,
+      "cbmOverflowCount": 0,
+      "weightOverflowCount": 0,
+      "strictAuditPass": true,
+      "userDeclaredTotalCbm": 91.36,
+      "physicalTotalCbm": 85.55,
+      "legacyDecisionTotalCbm": 89.54,
+      "decidedVsRunnerUpDeltaCbm": 0,
+      "candidatesEvaluated": [
+        {
+          "status": "valid",
+          "types": [
+            "40FT",
+            "40FT"
+          ],
+          "capacity": 120,
+          "basis": "physical",
+          "stage": "fullMode",
+          "packTimeMs": 16103
+        }
+      ],
+      "practitionerMismatchCount": 28,
+      "practitionerMismatchSource": "verify-script",
+      "packTimeMs": 16103,
+      "packTimeMedianOf3": 16605,
+      "wallClockMs": 65144,
+      "notes": "실무자 28건 차이 · 결정: physical"
+    },
+    {
+      "sampleId": "sg-4",
+      "sampleName": "4ST SG TOTAL",
+      "sampleFile": "data/samples/singapore-total-4.json",
+      "inputFileHash": "sha256:549341fea7ccf8a5",
+      "expectedStatus": "PASS",
+      "mode": "auto",
+      "inputCargoRowCount": 54,
+      "inputUnitTotalCount": 199,
+      "inputTotalWeightKg": 184450.27500000002,
+      "lightModeUsed": false,
+      "containerSet": [
+        "40FT",
+        "40FT",
+        "40FT"
+      ],
+      "containerCount": 3,
+      "containerCapacityCbmList": [
+        60,
+        60,
+        60
+      ],
+      "totalCapacityCbm": 180,
+      "cbmBasis": "physical",
+      "userOverride": false,
+      "placedCount": 199,
+      "unplacedCount": 0,
+      "unplacedCargoIds": [],
+      "cargoIdSplitCount": 0,
+      "bookingSplitCount": 0,
+      "hardViolationCount": 0,
+      "cbmOverflowCount": 2,
+      "weightOverflowCount": 0,
+      "strictAuditPass": true,
+      "userDeclaredTotalCbm": 156.31,
+      "physicalTotalCbm": 147.45,
+      "legacyDecisionTotalCbm": 156.31,
+      "decidedVsRunnerUpDeltaCbm": 0,
+      "candidatesEvaluated": [
+        {
+          "status": "valid",
+          "types": [
+            "40FT",
+            "40FT",
+            "40FT"
+          ],
+          "capacity": 180,
+          "basis": "physical",
+          "stage": "fullMode",
+          "packTimeMs": 4
+        }
+      ],
+      "practitionerMismatchCount": null,
+      "practitionerMismatchSource": "none",
+      "packTimeMs": 4,
+      "packTimeMedianOf3": 4,
+      "wallClockMs": 20,
+      "notes": "결정: physical"
+    },
+    {
+      "sampleId": "hm-1",
+      "sampleName": "1ST HM TOTAL",
+      "sampleFile": "data/samples/hochiminh-total.json",
+      "inputFileHash": "sha256:db39a8c37b1dd728",
+      "expectedStatus": "PASS",
+      "mode": "auto",
+      "inputCargoRowCount": 34,
+      "inputUnitTotalCount": 652,
+      "inputTotalWeightKg": 1445694.68,
+      "lightModeUsed": false,
+      "containerSet": [
+        "40FT",
+        "20FT"
+      ],
+      "containerCount": 2,
+      "containerCapacityCbmList": [
+        60,
+        28
+      ],
+      "totalCapacityCbm": 88,
+      "cbmBasis": "physical",
+      "userOverride": false,
+      "placedCount": 652,
+      "unplacedCount": 0,
+      "unplacedCargoIds": [],
+      "cargoIdSplitCount": 0,
+      "bookingSplitCount": 0,
+      "hardViolationCount": 0,
+      "cbmOverflowCount": 1,
+      "weightOverflowCount": 0,
+      "strictAuditPass": true,
+      "userDeclaredTotalCbm": 85.74,
+      "physicalTotalCbm": 29.43,
+      "legacyDecisionTotalCbm": 85.74,
+      "decidedVsRunnerUpDeltaCbm": 0,
+      "candidatesEvaluated": [
+        {
+          "status": "valid",
+          "types": [
+            "40FT",
+            "20FT"
+          ],
+          "capacity": 88,
+          "basis": "physical",
+          "stage": "fullMode",
+          "packTimeMs": 0
+        }
+      ],
+      "practitionerMismatchCount": 0,
+      "practitionerMismatchSource": "verify-script",
+      "packTimeMs": 0,
+      "packTimeMedianOf3": 0,
+      "wallClockMs": 2,
+      "notes": "결정: physical"
+    },
+    {
+      "sampleId": "hm-2",
+      "sampleName": "2ST HM TOTAL",
+      "sampleFile": "data/samples/hochiminh-total-2.json",
+      "inputFileHash": "sha256:e9a25226429ffd91",
+      "expectedStatus": "KNOWN_MISMATCH",
+      "mode": "auto",
+      "inputCargoRowCount": 26,
+      "inputUnitTotalCount": 251,
+      "inputTotalWeightKg": 218852.36800000002,
+      "lightModeUsed": false,
+      "containerSet": [
+        "40FT",
+        "40FT",
+        "20FT"
+      ],
+      "containerCount": 3,
+      "containerCapacityCbmList": [
+        60,
+        60,
+        28
+      ],
+      "totalCapacityCbm": 148,
+      "cbmBasis": "physical",
+      "userOverride": false,
+      "placedCount": 251,
+      "unplacedCount": 0,
+      "unplacedCargoIds": [],
+      "cargoIdSplitCount": 0,
+      "bookingSplitCount": 0,
+      "hardViolationCount": 0,
+      "cbmOverflowCount": 0,
+      "weightOverflowCount": 0,
+      "strictAuditPass": true,
+      "userDeclaredTotalCbm": 126.93,
+      "physicalTotalCbm": 111.77,
+      "legacyDecisionTotalCbm": 127.2,
+      "decidedVsRunnerUpDeltaCbm": 0,
+      "candidatesEvaluated": [
+        {
+          "status": "valid",
+          "types": [
+            "40FT",
+            "40FT",
+            "20FT"
+          ],
+          "capacity": 148,
+          "basis": "physical",
+          "stage": "fullMode",
+          "packTimeMs": 32566
+        }
+      ],
+      "practitionerMismatchCount": 28,
+      "practitionerMismatchSource": "verify-script",
+      "packTimeMs": 32566,
+      "packTimeMedianOf3": 33568,
+      "wallClockMs": 155480,
+      "notes": "실무자 28건 차이 · 결정: physical"
+    },
+    {
+      "sampleId": "hm-3",
+      "sampleName": "3ST HM TOTAL",
+      "sampleFile": "data/samples/hochiminh-total-3.json",
+      "inputFileHash": "sha256:1892dedb67f77559",
+      "expectedStatus": "PASS",
+      "mode": "auto",
+      "inputCargoRowCount": 19,
+      "inputUnitTotalCount": 350,
+      "inputTotalWeightKg": 660959.06,
+      "lightModeUsed": false,
+      "containerSet": [
+        "40FT",
+        "20FT"
+      ],
+      "containerCount": 2,
+      "containerCapacityCbmList": [
+        60,
+        28
+      ],
+      "totalCapacityCbm": 88,
+      "cbmBasis": "physical",
+      "userOverride": false,
+      "placedCount": 350,
+      "unplacedCount": 0,
+      "unplacedCargoIds": [],
+      "cargoIdSplitCount": 0,
+      "bookingSplitCount": 0,
+      "hardViolationCount": 0,
+      "cbmOverflowCount": 0,
+      "weightOverflowCount": 0,
+      "strictAuditPass": true,
+      "userDeclaredTotalCbm": 69.5,
+      "physicalTotalCbm": 61.19,
+      "legacyDecisionTotalCbm": 69.5,
+      "decidedVsRunnerUpDeltaCbm": 0,
+      "candidatesEvaluated": [
+        {
+          "status": "valid",
+          "types": [
+            "40FT",
+            "20FT"
+          ],
+          "capacity": 88,
+          "basis": "physical",
+          "stage": "fullMode",
+          "packTimeMs": 0
+        }
+      ],
+      "practitionerMismatchCount": null,
+      "practitionerMismatchSource": "none",
+      "packTimeMs": 0,
+      "packTimeMedianOf3": 0,
+      "wallClockMs": 23,
+      "notes": "결정: physical"
+    },
+    {
+      "sampleId": "hm-4",
+      "sampleName": "4ST HM TOTAL",
+      "sampleFile": "data/samples/hochiminh-total-4.json",
+      "inputFileHash": "sha256:b74aff64e4c49fc5",
+      "expectedStatus": "KNOWN_MISMATCH",
+      "mode": "auto",
+      "inputCargoRowCount": 41,
+      "inputUnitTotalCount": 617,
+      "inputTotalWeightKg": 374928.288,
+      "lightModeUsed": false,
+      "containerSet": [
+        "40FT",
+        "40FT",
+        "40FT"
+      ],
+      "containerCount": 3,
+      "containerCapacityCbmList": [
+        60,
+        60,
+        60
+      ],
+      "totalCapacityCbm": 180,
+      "cbmBasis": "physical",
+      "userOverride": true,
+      "placedCount": 617,
+      "unplacedCount": 0,
+      "unplacedCargoIds": [],
+      "cargoIdSplitCount": 0,
+      "bookingSplitCount": 0,
+      "hardViolationCount": 0,
+      "cbmOverflowCount": 1,
+      "weightOverflowCount": 0,
+      "strictAuditPass": true,
+      "userDeclaredTotalCbm": 137.93,
+      "physicalTotalCbm": 86.69,
+      "legacyDecisionTotalCbm": 148.55,
+      "decidedVsRunnerUpDeltaCbm": 0,
+      "candidatesEvaluated": [
+        {
+          "status": "valid",
+          "types": [
+            "40FT",
+            "40FT",
+            "40FT"
+          ],
+          "capacity": 180,
+          "basis": "physical",
+          "stage": "fullMode",
+          "packTimeMs": 173740
+        }
+      ],
+      "practitionerMismatchCount": 29,
+      "practitionerMismatchSource": "manual",
+      "packTimeMs": 173740,
+      "packTimeMedianOf3": 172907,
+      "wallClockMs": 685509,
+      "notes": "실무자 29건 차이 · 결정: physical"
+    }
+  ]
+}

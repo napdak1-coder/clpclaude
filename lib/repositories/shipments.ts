@@ -33,13 +33,19 @@ function parseUnitSizes(raw: unknown): UnitSize[] | undefined {
       const q = Number(o.quantity);
       const wt = Number(o.weight);
       if (!Number.isFinite(w) || !Number.isFinite(l) || !Number.isFinite(h) || !Number.isFinite(q)) continue;
-      if (w <= 0 || l <= 0 || h <= 0 || q <= 0) continue;
+      // quantity > 0 만 강제. W/L/H 는 0 허용 (CT 박스 — 사이즈 없는 카톤 케이스, 2026-05-13 수정)
+      if (q <= 0) continue;
+      if (w < 0 || l < 0 || h < 0) continue;
+      const ct = normalizeCargoType((o.cargoType ?? null) as unknown);
+      const cbmVal = Number(o.cbm);
       cleaned.push({
         width: w,
         length: l,
         height: h,
         quantity: q,
         weight: Number.isFinite(wt) && wt >= 0 ? wt : 0,
+        ...(ct ? { cargoType: ct } : {}),
+        ...(Number.isFinite(cbmVal) && cbmVal > 0 ? { cbm: cbmVal } : {}),
       });
     }
     return cleaned.length > 0 ? cleaned : undefined;
@@ -51,14 +57,31 @@ function parseUnitSizes(raw: unknown): UnitSize[] | undefined {
 function serializeUnitSizes(arr: UnitSize[] | undefined | null): string | null {
   if (!arr || arr.length === 0) return null;
   const cleaned = arr
-    .filter((u) => u.width > 0 && u.length > 0 && u.height > 0 && u.quantity > 0)
-    .map((u) => ({
-      width: u.width,
-      length: u.length,
-      height: u.height,
-      quantity: u.quantity,
-      weight: typeof u.weight === "number" && u.weight >= 0 ? u.weight : 0,
-    }));
+    // quantity > 0 만 강제. W/L/H 는 0 허용 (CT 박스 케이스, 2026-05-13 수정)
+    .filter((u) => u.quantity > 0 && u.width >= 0 && u.length >= 0 && u.height >= 0)
+    .map((u) => {
+      const base: {
+        width: number;
+        length: number;
+        height: number;
+        quantity: number;
+        weight: number;
+        cargoType?: UnitSize["cargoType"];
+        cbm?: number;
+      } = {
+        width: u.width,
+        length: u.length,
+        height: u.height,
+        quantity: u.quantity,
+        weight: typeof u.weight === "number" && u.weight >= 0 ? u.weight : 0,
+      };
+      // 박스별 화물 종류 — 행 기본 cargoType 과 다를 때만 unitSize 에 보존됨 (UnitSizesModal:233~236).
+      // DB 직렬화에서 빠뜨리면 사용자가 unit 별로 변경해도 저장 후 손실됨 (2026-05-13 수정).
+      if (u.cargoType) base.cargoType = u.cargoType;
+      // 직접 입력 CBM — 주로 CT 박스 (사이즈 없는 카톤) 가 부피만 명시할 때 (2026-05-13 추가)
+      if (typeof u.cbm === "number" && u.cbm > 0) base.cbm = u.cbm;
+      return base;
+    });
   return cleaned.length > 0 ? JSON.stringify(cleaned) : null;
 }
 

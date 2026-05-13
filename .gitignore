@@ -37,11 +37,14 @@ yarn-error.log*
 next-env.d.ts
 
 # database (local SQLite file)
-/data/
+# data/ 안 직접 파일은 무시. 하위 디렉토리는 명시 추가 가능.
+/data/*
 *.db
 *.db-journal
 *.sqlite
 *.sqlite3
+# baseline 회귀 매트릭스 — git 추적 (data/ 무시 룰 예외)
+!/data/regression/
 
 # editor
 .vscode/

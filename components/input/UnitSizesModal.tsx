@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import type { UnitSize, CargoType } from "@/types/cargo";
 import { CARGO_TYPES } from "@/types/cargo";
+import { correctInflatedUnitWeights } from "@/lib/excel";
 
 interface UnitSizesModalProps {
   open: boolean;
@@ -23,6 +24,11 @@ interface UnitSizesModalProps {
   baseWeight?: number;
   /** 행의 기본 화물 종류 (PL/CT 등) — 사이즈 그룹마다 다른 화종 미지정 시 이 값 사용. 사용자가 다르게 선택하면 그 값으로 덮어씀. */
   baseCargoType?: CargoType;
+  /**
+   * 행 기준 CBM (cfs cbm 우선, 없으면 aboutCbm). 주로 CT 행에서 unit cbm 자동 분배에 사용.
+   * 새 그룹 생성 시 unit cbm = baseCbm / 그룹 수 로 자동 채움 (CT 박스가 사이즈 없이 부피만 명시하는 케이스).
+   */
+  baseCbm?: number;
   initial?: UnitSize[];
   itemLabel?: string;
   onClose: () => void;
@@ -58,9 +64,28 @@ function unitWeightDefault(totalWeight: number, totalQty: number): number {
 
 function defaultDraft(base: UnitSizesModalProps): DraftRow[] {
   const perUnit = unitWeightDefault(base.baseWeight ?? 0, base.baseQuantity);
+  // 자동 cbm 분배 — 사이즈 없는 행(W/L/H 중 0)이면 cargoType 무관하게 행 cbm/about 을 그룹 수로 분배.
+  // 사이즈 있는 행은 박스 W×L×H 계산이 우선이라 자동 cbm 분배 X.
+  // (algorithm.ts:classify 룰과 일치 — 사이즈 0 이면 CT 트랙으로 처리)
+  const sizeMissing =
+    !base.baseSize.width ||
+    base.baseSize.width <= 0 ||
+    !base.baseSize.length ||
+    base.baseSize.length <= 0 ||
+    !base.baseSize.height ||
+    base.baseSize.height <= 0;
+  const baseCbm =
+    sizeMissing && base.baseCbm && base.baseCbm > 0 ? base.baseCbm : 0;
   // 기존 unitSizes 가 있고 무게가 0이면 행의 단위중량 기본값(분배된 baseWeight 또는 perUnit)으로 보강
   if (base.initial && base.initial.length > 0) {
-    return base.initial.map((u) => {
+    // 모든 unitSize.weight 가 행의 weightPerUnitKg 와 같으면 (잘못 파싱된 케이스) quantity 비율로 분배.
+    // 샘플 JSON 처럼 ExcelImport 거치지 않은 raw 데이터의 unit weight 가 행 총무게와 같이 들어있는 결함 보정.
+    const corrected =
+      correctInflatedUnitWeights(
+        { quantity: base.baseQuantity, weightPerUnitKg: base.baseWeight ?? 0 },
+        base.initial,
+      ) ?? base.initial;
+    return corrected.map((u) => {
       // baseWeight 직접 폴백 (분배된 단위당 무게 우선)
       const draft = makeDraft(u, base.baseWeight ?? 0);
       // 보조 — 그래도 0이면 perUnit (행 합 ÷ 수량) 폴백
@@ -74,28 +99,47 @@ function defaultDraft(base: UnitSizesModalProps): DraftRow[] {
   // 너무 많으면 가독성 떨어지므로 50 초과 시 단일 그룹(qty=N) 으로 폴백.
   const n = Math.max(1, base.baseQuantity || 1);
   if (n > 50) {
-    return [
-      {
-        rowKey: crypto.randomUUID(),
-        width: base.baseSize.width || 0,
-        length: base.baseSize.length || 0,
-        height: base.baseSize.height || 0,
-        quantity: n,
-        weight: perUnit,
-      },
-    ];
+    const grp: DraftRow = {
+      rowKey: crypto.randomUUID(),
+      width: base.baseSize.width || 0,
+      length: base.baseSize.length || 0,
+      height: base.baseSize.height || 0,
+      quantity: n,
+      weight: perUnit,
+    };
+    if (baseCbm > 0) grp.cbm = Number(baseCbm.toFixed(4));
+    return [grp];
   }
-  return Array.from({ length: n }, () => ({
-    rowKey: crypto.randomUUID(),
-    width: base.baseSize.width || 0,
-    length: base.baseSize.length || 0,
-    height: base.baseSize.height || 0,
-    quantity: 1,
-    weight: perUnit,
-  }));
+  // 그룹 수가 여러 개일 때 행 cbm 을 균등 분배 (반올림 오차는 마지막 그룹에 흡수)
+  const perGroupCbm = baseCbm > 0 ? baseCbm / n : 0;
+  return Array.from({ length: n }, (_, idx) => {
+    const grp: DraftRow = {
+      rowKey: crypto.randomUUID(),
+      width: base.baseSize.width || 0,
+      length: base.baseSize.length || 0,
+      height: base.baseSize.height || 0,
+      quantity: 1,
+      weight: perUnit,
+    };
+    if (perGroupCbm > 0) {
+      // 마지막 그룹은 합 보정 (반올림 오차 흡수)
+      const v =
+        idx === n - 1 ? baseCbm - perGroupCbm * (n - 1) : perGroupCbm;
+      grp.cbm = Number(v.toFixed(4));
+    }
+    return grp;
+  });
 }
 
-function unitCbm(u: { width: number; length: number; height: number; quantity: number }): number {
+function unitCbm(u: {
+  width: number;
+  length: number;
+  height: number;
+  quantity: number;
+  cbm?: number;
+}): number {
+  // 사용자가 직접 입력한 cbm 우선 (주로 CT 박스 — 사이즈 없는 카톤). 없으면 W×L×H×Q 계산값.
+  if (typeof u.cbm === "number" && u.cbm > 0) return u.cbm;
   return (u.width * u.length * u.height * u.quantity) / 1_000_000;
 }
 
@@ -107,11 +151,13 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
   const { open, baseQuantity, baseWeight, baseCargoType, onClose, onSave, itemLabel } = props;
   const [drafts, setDrafts] = useState<DraftRow[]>(() => defaultDraft(props));
 
-  // 모달이 열릴 때마다 초기값을 다시 적용 (서로 다른 행을 편집해도 맞물림)
+  // 모달이 열릴 때만 초기값 적용. baseSize/baseWeight/baseQuantity 변경 시 자동 reset 하지 않음
+  // (모달 안 사용자 입력이 메인 행 변경으로 사라지는 결함 방지 — 2026-05-13 수정).
+  // 다른 행을 선택해서 다시 열면 open=false → true 전이로 자연스럽게 재초기화됨.
   useEffect(() => {
     if (open) setDrafts(defaultDraft(props));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, props.initial, props.baseQuantity, props.baseSize.width, props.baseSize.length, props.baseSize.height, props.baseWeight]);
+  }, [open, props.initial]);
 
   if (!open) return null;
 
@@ -124,9 +170,10 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
       ...prev,
       {
         rowKey: crypto.randomUUID(),
-        width: 0,
-        length: 0,
-        height: 0,
+        // 새 그룹은 메인 행 사이즈로 시작 (빈 행이 저장 단계 filter 에서 제외되는 결함 방지 — 2026-05-13 수정)
+        width: props.baseSize.width || 0,
+        length: props.baseSize.length || 0,
+        height: props.baseSize.height || 0,
         quantity: 1,
         weight: perUnitDefault,
       },
@@ -147,14 +194,29 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
 
   const handleSave = () => {
     const cleaned: UnitSize[] = drafts
-      .filter((d) => d.width > 0 && d.length > 0 && d.height > 0 && d.quantity > 0)
-      .map((d) => ({
-        width: d.width,
-        length: d.length,
-        height: d.height,
-        quantity: d.quantity,
-        weight: d.weight >= 0 ? d.weight : 0,
-      }));
+      .filter((d) => {
+        if (d.quantity <= 0) return false;
+        // CT 박스(사이즈 없는 카톤) 는 0×0×0 허용 — unitSize 안에 일부 unit 만 CT 로 분리하는 케이스.
+        // splitCargoesByUnitCargoType 이 cargoType 별로 cargo 를 분리해 CT 박스는 CBM 만 합산함.
+        const effectiveCargoType = d.cargoType ?? baseCargoType;
+        if (effectiveCargoType === "CT") return true;
+        return d.width > 0 && d.length > 0 && d.height > 0;
+      })
+      .map((d) => {
+        const u: UnitSize = {
+          width: d.width,
+          length: d.length,
+          height: d.height,
+          quantity: d.quantity,
+          weight: d.weight >= 0 ? d.weight : 0,
+        };
+        // 박스별 화물 종류 — 행 기본값(baseCargoType)과 다를 때만 보존 (line 232~236 의 저장 규칙과 일치).
+        // 이전엔 이 필드를 빠뜨려 사용자가 unit 별 cargoType 변경 후 저장이 손실됐음 (2026-05-13 수정).
+        if (d.cargoType) u.cargoType = d.cargoType;
+        // 직접 입력 CBM — 주로 CT 박스 (사이즈 없는 카톤) 가 부피만 명시할 때 (2026-05-13 추가)
+        if (typeof d.cbm === "number" && d.cbm > 0) u.cbm = d.cbm;
+        return u;
+      });
     onSave(cleaned);
     onClose();
   };
@@ -199,7 +261,7 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
                 <th className="px-1 py-1 text-right">수량</th>
                 <th className="px-1 py-1 text-right">박스 1개 무게 (kg)</th>
                 <th className="px-1 py-1 text-right">화종</th>
-                <th className="px-1 py-1 text-right">CBM</th>
+                <th className="px-1 py-1 text-right">그룹 총 CBM (m³)</th>
                 <th className="px-1 py-1 text-right">그룹 총 무게 (kg)</th>
                 <th className="px-1 py-1"></th>
               </tr>
@@ -246,8 +308,29 @@ export function UnitSizesModal(props: UnitSizesModalProps) {
                       ))}
                     </select>
                   </td>
-                  <td className="px-1 py-1 text-right text-neutral-700">
-                    {unitCbm(d).toFixed(4)}
+                  <td className="px-1 py-1 text-right">
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={d.cbm ?? ""}
+                      placeholder={(
+                        (d.width * d.length * d.height * d.quantity) /
+                        1_000_000
+                      ).toFixed(4)}
+                      onChange={(e) => {
+                        const t = e.target.value;
+                        const num = Number(t);
+                        updateRow(d.rowKey, {
+                          cbm:
+                            t === "" || !Number.isFinite(num) || num <= 0
+                              ? undefined
+                              : num,
+                        });
+                      }}
+                      title="직접 입력 우선 (주로 CT 박스). 비우면 W×L×H×수량 계산값 사용."
+                      className="w-24 rounded border border-neutral-300 px-1 py-0.5 text-right"
+                    />
                   </td>
                   <td className="px-1 py-1 text-right text-neutral-700">
                     {unitWeightTotal(d).toFixed(1)}

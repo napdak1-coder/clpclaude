@@ -170,7 +170,8 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
 
   // 20컬럼: # / HBL / DEST / 부킹 / 품목 / 실화주 / 화주 / 구분 / 가로 / 세로 / 높이 / 수량 / 중량 / CFS / ABOUT / 시스템 / 사이즈 / 리마크 / 메모 / 삭제
   // 화주 숨김은 컬럼 폭 변경이 아닌 시각적 모자이크(blur) 로 처리 — 레이아웃 그대로.
-  const colWidths = ["1.5%", "6%", "8.5%", "6%", "2%", "8%", "7%", "2.5%", "3%", "3%", "3%", "2.5%", "4%", "5%", "4%", "5%", "3%", "8%", "16.5%", "1.5%"];
+  // CFS / ABOUT / 시스템CBM — CBM 류 3 컬럼 동일 너비 5% (ABOUT 데이터 잘림 방지, 2026-05-13 수정)
+  const colWidths = ["1.5%", "6%", "8.5%", "6%", "2%", "8%", "7%", "2.5%", "3%", "3%", "3%", "2.5%", "4%", "5%", "5%", "5%", "3%", "8%", "15.5%", "1.5%"];
   const visibleColCount = 20;
   // 모자이크 클래스 — 입력 값과 placeholder 가 흐려지고 클릭/포커스도 차단해 옆사람이 읽지 못하게.
   const shipperMaskCls = hideShippers
@@ -290,9 +291,33 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
               const cbmDiff =
                 referenceCbm != null ? Math.abs(sysCbm - referenceCbm) : null;
               const cbmMismatch = cbmDiff != null && cbmDiff > 0.01;
+              // unitSizes 무게 분배 불일치 — 행 weightPerUnitKg vs unit.weight × qty 합.
+              // 차이 5% 또는 절대 100kg 초과면 사용자 확인 필요 (분배 오류 가능).
+              let weightMismatch = false;
+              if (hasUnitSizes && r.weightPerUnitKg > 0) {
+                const unitWtSum = (r.unitSizes ?? []).reduce(
+                  (s, u) => s + (u.weight ?? 0) * (u.quantity ?? 1),
+                  0,
+                );
+                const dWt = Math.abs(unitWtSum - r.weightPerUnitKg);
+                weightMismatch = dWt > 100 && dWt / r.weightPerUnitKg > 0.05;
+              }
+              // 불일치 행 깜박임 — 사용자가 한눈에 확인하도록 시각 강조 (2026-05-13 추가)
+              const rowBlink = cbmMismatch || weightMismatch;
               return (
                 <Fragment key={r.rowKey}>
-                <tr className="border-t border-neutral-200 align-middle leading-none">
+                <tr
+                  className={`border-t border-neutral-200 align-middle leading-none ${
+                    rowBlink ? "animate-pulse bg-red-50" : ""
+                  }`}
+                  title={
+                    rowBlink
+                      ? `[확인 필요] ${weightMismatch ? "무게 분배 불일치" : ""}${
+                          weightMismatch && cbmMismatch ? " · " : ""
+                        }${cbmMismatch ? "CBM 분배 불일치" : ""}`
+                      : undefined
+                  }
+                >
                   <td className="px-0 py-0.5 text-center text-[11px] text-neutral-500">
                     <div>{idx + 1}</div>
                     {distInfo.distributedFields.has(r.rowKey) && (
@@ -376,11 +401,18 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                   <td className="px-0 py-0.5">
                     <select
                       value={r.cargoType}
-                      onChange={(e) =>
-                        updateRow(r.rowKey, {
-                          cargoType: e.target.value as CargoType,
-                        })
-                      }
+                      onChange={(e) => {
+                        const next = e.target.value as CargoType;
+                        const patch: Partial<CargoRow> = { cargoType: next };
+                        // unitSizes 안 cargoType 도 동기화 (알고리즘은 unit별 cargoType 우선)
+                        if (r.unitSizes && r.unitSizes.length > 0) {
+                          patch.unitSizes = r.unitSizes.map((u) => ({
+                            ...u,
+                            cargoType: next,
+                          }));
+                        }
+                        updateRow(r.rowKey, patch);
+                      }}
                       className={`block w-full min-w-0 rounded border px-0.5 py-0 text-[11px] leading-tight ${
                         r.cargoType === "CT"
                           ? "border-amber-300 bg-amber-50 text-amber-800"
@@ -421,9 +453,30 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
                         }
                         onChange={(e) => {
                           const num = Number(e.target.value);
-                          updateRow(r.rowKey, {
-                            [field]: Number.isFinite(num) ? num : 0,
-                          } as Partial<CargoRow>);
+                          const value = Number.isFinite(num) ? num : 0;
+                          const patch: Partial<CargoRow> = {
+                            [field]: value,
+                          } as Partial<CargoRow>;
+                          // unitSizes 가 있으면 W·L·H·weight 도 같이 동기화 (알고리즘은 unitSizes 우선 사용)
+                          if (r.unitSizes && r.unitSizes.length > 0) {
+                            const usField =
+                              field === "widthCm"
+                                ? "width"
+                                : field === "lengthCm"
+                                  ? "length"
+                                  : field === "heightCm"
+                                    ? "height"
+                                    : field === "weightPerUnitKg"
+                                      ? "weight"
+                                      : null;
+                            if (usField) {
+                              patch.unitSizes = r.unitSizes.map((u) => ({
+                                ...u,
+                                [usField]: value,
+                              }));
+                            }
+                          }
+                          updateRow(r.rowKey, patch);
                         }}
                         title={
                           field === "weightPerUnitKg" &&
@@ -628,6 +681,15 @@ export function CargoTable({ rows, onChange }: CargoTableProps) {
             : 0
         }
         baseCargoType={sizeModalRow?.cargoType}
+        baseCbm={
+          sizeModalRow
+            ? (isDistributed(sizeModalRow.rowKey, "cbm")
+                ? (distributedValue(sizeModalRow.rowKey, "cbm") ?? undefined)
+                : isDistributed(sizeModalRow.rowKey, "aboutCbm")
+                  ? (distributedValue(sizeModalRow.rowKey, "aboutCbm") ?? undefined)
+                  : (sizeModalRow.cbm ?? sizeModalRow.aboutCbm ?? undefined))
+            : undefined
+        }
         initial={sizeModalRow?.unitSizes}
         itemLabel={sizeModalRow?.itemName || undefined}
         onClose={() => setSizeModalRowKey(null)}

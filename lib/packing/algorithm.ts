@@ -33,6 +33,10 @@ import type {
   ContainerPlan,
   UnplacedItem,
 } from "../../types/plan.ts";
+import type {
+  CLPDebugInfo,
+  ContainerCandidateAttempt,
+} from "../../types/clp-debug.ts";
 import {
   CONTAINERS,
   getContainerCbm,
@@ -101,7 +105,13 @@ const REGULAR_TYPES = new Set(["PL", "WB", "WC", "WD", "CR", "CL", "PK"]);
 function cargoCbm(c: CargoSpec): number {
   if (c.unitSizes && c.unitSizes.length > 0) {
     return c.unitSizes.reduce(
-      (s, u) => s + (u.width * u.length * u.height * u.quantity) / 1_000_000,
+      (s, u) =>
+        s +
+        // unit.cbm 직접 입력값 우선 (CT 박스 — 사이즈 없는 카톤 케이스).
+        // 없으면 W×L×H×Q 박스 사이즈 계산값으로 폴백.
+        (typeof u.cbm === "number" && u.cbm > 0
+          ? u.cbm
+          : (u.width * u.length * u.height * u.quantity) / 1_000_000),
       0,
     );
   }
@@ -599,6 +609,12 @@ export interface PackOptions {
    * 활성: { enabled: true }
    */
   longAxisAnchor?: LongAxisAnchorOptions;
+  /**
+   * regression baseline 측정용 디버그 envelope 부착.
+   * true 일 때만 결과 객체에 `debug: CLPDebugInfo` 부착. 기본 false (production 영향 0).
+   * production UI 노출 X.
+   */
+  attachDebug?: boolean;
 }
 
 /** cm 단위 미세 좌표 비교 — extreme-point 내부 EPS 와 같은 수준이면 충분 */
@@ -1121,6 +1137,14 @@ export function pack(
   // 1) 분류
   const { visualCargoes, ctCargoes, completedCargoes } = classify(cargoes);
 
+  // [attachDebug] 분배 후 cargoes 기준 부피 3 값 캡쳐 (regression baseline 전용, production 영향 0)
+  const _dbgUserDeclaredTotalCbm = options?.attachDebug
+    ? cargoes.reduce((s, c) => s + (c.cbm ?? c.aboutCbm ?? cargoCbm(c)), 0)
+    : 0;
+  const _dbgPhysicalTotalCbm = options?.attachDebug
+    ? cargoes.reduce((s, c) => s + cargoCbm(c), 0)
+    : 0;
+
   // 2) CBM/무게 합 (CT 만 bulk, 나머지는 시각)
   const visualCbm = visualCargoes.reduce((s, c) => s + cargoCbm(c), 0);
   const ctCbm = ctCargoes.reduce(
@@ -1129,6 +1153,8 @@ export function pack(
   );
   const completedCbm = completedCargoes.reduce((s, c) => s + (c.cbm ?? 0), 0); // 항상 0 (호환용)
   const totalCbm = visualCbm + ctCbm + completedCbm;
+  // [attachDebug] 기존 알고리즘 결정용 합 (회귀 추적)
+  const _dbgLegacyDecisionTotalCbm = options?.attachDebug ? totalCbm : 0;
   // 정보용: 입고완료(c.cbm 입력) 화물의 사용자 입력 CBM 합 — 시각화 위치 무관, summary 표시 전용
   const completedInfoCbm = visualCargoes
     .filter((c) => c.cbm != null && c.cbm > 0)
@@ -1139,6 +1165,9 @@ export function pack(
     options?.fixedContainers && options.fixedContainers.length > 0
       ? options.fixedContainers
       : decideContainers(totalCbm, completedCbm, mode);
+  if (process.env.RULE_CONT_DEBUG) {
+    console.warn(`[cont-DEBUG] visualCbm=${visualCbm.toFixed(2)} ctCbm=${ctCbm.toFixed(2)} totalCbm=${totalCbm.toFixed(2)} mode=${mode} fixed=${options?.fixedContainers ? "Y" : "N"} → types=${types.join("+")}`);
+  }
   const containers: ContainerState[] = types.map((t, i) =>
     makeContainer(i + 1, getContainerSpec(t)),
   );
@@ -1188,6 +1217,10 @@ export function pack(
   //     일반화물의 noStacking 자체 플래그는 "내 위에 못 쌓는다" 의미라 자기는 어디든 갈 수 있음.
   //     아래 화물의 stack 가능 여부는 canStackOn 이 검증.
   const allUnits = expandToUnits(visualCargoes);
+  // [attachDebug] visual unit + CT cargo quantity 합 (placedCount + unplacedCount 검증용)
+  const _dbgInputUnitTotalCount = options?.attachDebug
+    ? allUnits.length + ctCargoes.reduce((s, c) => s + (c.quantity ?? 1), 0)
+    : 0;
   const sortBig = (units: UnitItem[]): UnitItem[] => {
     const strat = options?.sortStrategy ?? "ldf";
     if (strat === "input") return [...units];
@@ -2332,6 +2365,44 @@ export function pack(
     }
   }
 
+  // [attachDebug] 단일 후보 결과 기록 (candidateUnion 미적용 단계 — min 1 보장)
+  let _dbgInfo: CLPDebugInfo | undefined;
+  if (options?.attachDebug) {
+    const candidateTypes = plans.map((p) => p.spec.type);
+    const candidateCapacity = plans.reduce((s, p) => s + p.spec.maxCbm, 0);
+    const candidateAttempt: ContainerCandidateAttempt =
+      unplacedOut.length === 0
+        ? {
+            status: "valid",
+            types: candidateTypes,
+            capacity: candidateCapacity,
+            basis: "physical",
+            stage: "fullMode",
+            packTimeMs: 0,
+          }
+        : {
+            status: "invalid",
+            types: candidateTypes,
+            capacity: candidateCapacity,
+            basis: "physical",
+            stage: "fullMode",
+            packTimeMs: 0,
+            failReasons: ["unplaced"],
+          };
+    _dbgInfo = {
+      userDeclaredTotalCbm: _dbgUserDeclaredTotalCbm,
+      physicalTotalCbm: _dbgPhysicalTotalCbm,
+      legacyDecisionTotalCbm: _dbgLegacyDecisionTotalCbm,
+      inputUnitTotalCount: _dbgInputUnitTotalCount,
+      cbmBasis: "physical",
+      userOverride:
+        !!options?.fixedContainers && options.fixedContainers.length > 0,
+      candidatesEvaluated: [candidateAttempt],
+      mode,
+      lightModeUsed: false,
+    };
+  }
+
   return {
     containers: plans,
     unplaced: unplacedOut,
@@ -2345,6 +2416,7 @@ export function pack(
       avgFillRate,
       warnings,
     },
+    debug: _dbgInfo,
   };
 }
 
@@ -2823,6 +2895,205 @@ export function packBest(
   }
 
   return current;
+}
+
+/**
+ * 컨테이너 셋 결정 시 declared/physical 양쪽 후보를 모두 시도하는 packBest wrapper.
+ *
+ * 동기 — 기존 packBest 는 단일 후보(visualCbm + ctCbm 박스 합 기반)만 시도. 사용자
+ * 신고 부피(c.cbm/c.aboutCbm) 와 박스 합이 다른 경우 작은 셋이 valid 한데도 큰 셋이
+ * 선택되는 경계 케이스 발생 (예: 망작 60.03 m³ → 40FT 한 대 정원 60 초과 → 40+20,
+ * 4ST HM legacy 148.6 m³ → 40+40+20 정원 148 초과 → 40×3).
+ *
+ * 흐름:
+ *   1) options.fixedContainers 있으면 기존 packBest 그대로 (사용자 강제 우선)
+ *   2) 첫 시도 — 현재 알고리즘 + attachDebug 로 declared/physical 추출
+ *   3) 후보 union = decideContainers(declared) ∪ decideContainers(physical) ∪ 첫 시도 셋
+ *      (multiset key = `cand.slice().sort().join("|")`)
+ *   4) 컨 수 asc → 총 capacity asc 정렬 (작은 셋 우선)
+ *   5) 단락 평가 — 가장 작은 셋부터 packBest(fixedContainers 강제) 호출, valid 6 통과 시 즉시 채택
+ *   6) 모두 invalid 면 lex 최적 반환
+ *
+ * valid 6 조건:
+ *   - unplaced 0
+ *   - strictStackAudit pass + violations 0
+ *   - 각 컨 maxCbm 초과 X
+ *   - 각 컨 maxWeight 초과 X
+ *   - cargoId 분산 0
+ *   - booking 분산 0
+ *
+ * 절대 룰 준수:
+ *   - 점수 합산 X (lex comparator 만)
+ *   - fixedAssignment 미사용 (강제 cargo 매핑 X)
+ *   - safety buffer 복원 X
+ *   - 작은 셋 무조건 강제 X — 실제 pack 검증 통과해야 채택
+ */
+export function packBestWithCandidateUnion(
+  cargoes: CargoSpec[],
+  mode: ContainerMode,
+  options?: PackBestOptions,
+): CLPResult {
+  // 1) 사용자 fixedContainers 강제 — 기존 동작 그대로 (단일 후보)
+  if (options?.fixedContainers && options.fixedContainers.length > 0) {
+    return packBest(cargoes, mode, options);
+  }
+
+  // 2) 첫 시도 — 현재 알고리즘 (legacy 기준) + debug
+  const initial = packBest(cargoes, mode, { ...options, attachDebug: true });
+  const debug = initial.debug;
+  if (!debug) return initial; // 안전망
+
+  const initialCand: ContainerType[] = initial.containers.map((c) => c.spec.type);
+
+  // 3) 후보 union — decideContainers 두 번 + 첫 시도 셋
+  const declared = debug.userDeclaredTotalCbm;
+  const physical = debug.physicalTotalCbm;
+  const candDeclared = declared > 0 ? decideContainers(declared, 0, mode) : [];
+  const candPhysical = physical > 0 ? decideContainers(physical, 0, mode) : [];
+
+  const candKey = (c: ContainerType[]): string =>
+    c.slice().sort().join("|");
+  const uniqueByKey = new Map<string, ContainerType[]>();
+  const addCandidate = (c: ContainerType[]): void => {
+    if (c.length === 0) return; // 빈 후보 가드 (decideContainers 가 totalCbm=0 시 빈 배열 가능)
+    const key = candKey(c);
+    if (!uniqueByKey.has(key)) uniqueByKey.set(key, c);
+  };
+  addCandidate(candDeclared);
+  addCandidate(candPhysical);
+  addCandidate(initialCand);
+
+  // 4) 정렬 — 컨 수 asc → 총 capacity asc (작은 셋 우선)
+  const capacityOf = (c: ContainerType[]): number =>
+    c.reduce((s, t) => s + getContainerCbm(getContainerSpec(t)), 0);
+  const candidates = Array.from(uniqueByKey.values()).sort((a, b) => {
+    if (a.length !== b.length) return a.length - b.length;
+    return capacityOf(a) - capacityOf(b);
+  });
+
+  // 5) 단락 평가 — 작은 셋부터 packBest 시도, valid 6 통과 시 즉시 채택
+  const results: Array<{ result: CLPResult; cand: ContainerType[] }> = [];
+  const initialKey = candKey(initialCand);
+  for (const cand of candidates) {
+    const key = candKey(cand);
+    const result: CLPResult =
+      key === initialKey
+        ? initial
+        : packBest(cargoes, mode, {
+            ...options,
+            fixedContainers: cand,
+            attachDebug: true,
+          });
+    results.push({ result, cand });
+    if (isValid6(result)) return result;
+  }
+
+  // 6) 모두 invalid 면 lex 최적 반환
+  results.sort((a, b) => compareLex(a.result, b.result));
+  return results[0]?.result ?? initial;
+}
+
+/**
+ * valid 6 조건 — 작은 셋 단락 채택 조건.
+ * 모두 통과해야 valid. 하나라도 위반이면 큰 셋 시도로 넘어감.
+ */
+function isValid6(r: CLPResult): boolean {
+  const unplaced = r.unplaced.reduce((s, u) => s + (u.quantity ?? 1), 0);
+  if (unplaced > 0) return false;
+  const audit = strictStackAudit(r);
+  if (!audit.pass || audit.violations.length > 0) return false;
+  for (const c of r.containers) {
+    if (c.totalCbm + c.ctCbm > c.spec.maxCbm + 0.001) return false;
+    if (c.totalWeight > c.spec.maxWeightKg + 0.001) return false;
+  }
+  const { cargoSplit, bookingSplit } = countSplits(r);
+  if (cargoSplit > 0 || bookingSplit > 0) return false;
+  return true;
+}
+
+/** cargoId / bookingNo 가 2 컨 이상 분산된 건수 */
+function countSplits(r: CLPResult): {
+  cargoSplit: number;
+  bookingSplit: number;
+} {
+  const cargoCi = new Map<string, Set<number>>();
+  const bkCi = new Map<string, Set<number>>();
+  r.containers.forEach((c, ci) => {
+    for (const row of c.rows ?? []) {
+      for (const it of [...(row.bottomItems ?? []), ...(row.topItems ?? [])]) {
+        if (it.cargoId) {
+          const s = cargoCi.get(it.cargoId) ?? new Set<number>();
+          s.add(ci);
+          cargoCi.set(it.cargoId, s);
+        }
+        const bk = (it as { bookingNo?: string }).bookingNo;
+        if (bk) {
+          const s = bkCi.get(bk) ?? new Set<number>();
+          s.add(ci);
+          bkCi.set(bk, s);
+        }
+      }
+    }
+    for (const b of c.bulkItems ?? []) {
+      if (b.cargoId) {
+        const s = cargoCi.get(b.cargoId) ?? new Set<number>();
+        s.add(ci);
+        cargoCi.set(b.cargoId, s);
+      }
+      const bk = (b as { bookingNo?: string }).bookingNo;
+      if (bk) {
+        const s = bkCi.get(bk) ?? new Set<number>();
+        s.add(ci);
+        bkCi.set(bk, s);
+      }
+    }
+  });
+  let cargoSplit = 0;
+  for (const s of cargoCi.values()) if (s.size > 1) cargoSplit++;
+  let bookingSplit = 0;
+  for (const s of bkCi.values()) if (s.size > 1) bookingSplit++;
+  return { cargoSplit, bookingSplit };
+}
+
+/**
+ * candidateUnion 결과 비교 lex comparator (모두 invalid 일 때만 발동).
+ * 우선순위: unplaced → audit pass(역) → cbm overflow → weight overflow →
+ *           cargo split → booking split → 컨 수 → 총 capacity
+ * 점수 합산 X — 각 키를 차례로 비교.
+ */
+function compareLex(a: CLPResult, b: CLPResult): number {
+  const keyOf = (r: CLPResult): number[] => {
+    const unplaced = r.unplaced.reduce((s, u) => s + (u.quantity ?? 1), 0);
+    const audit = strictStackAudit(r);
+    const auditFail = audit.pass ? 0 : 1;
+    const hardViolations = audit.violations.length;
+    let cbmOverflow = 0;
+    let weightOverflow = 0;
+    let totalCap = 0;
+    for (const c of r.containers) {
+      if (c.totalCbm + c.ctCbm > c.spec.maxCbm + 0.001) cbmOverflow++;
+      if (c.totalWeight > c.spec.maxWeightKg + 0.001) weightOverflow++;
+      totalCap += c.spec.maxCbm;
+    }
+    const { cargoSplit, bookingSplit } = countSplits(r);
+    return [
+      unplaced,
+      auditFail,
+      hardViolations,
+      cbmOverflow,
+      weightOverflow,
+      cargoSplit,
+      bookingSplit,
+      r.containers.length,
+      totalCap,
+    ];
+  };
+  const ka = keyOf(a);
+  const kb = keyOf(b);
+  for (let i = 0; i < ka.length; i++) {
+    if (ka[i] !== kb[i]) return ka[i] - kb[i];
+  }
+  return 0;
 }
 
 // 테스트에서 내부 함수를 검증할 수 있도록 명시적으로 노출

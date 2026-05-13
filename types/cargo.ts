@@ -73,6 +73,12 @@ export interface UnitSize {
   /** 그룹의 단위당 중량 (kg). 미입력이면 0 — 알고리즘에는 행 단위 weightPerUnit 가 우선 사용 */
   weight?: number;
   /**
+   * 그룹 총 CBM (m³). 사용자가 직접 입력 — 주로 CT 박스 (사이즈 없는 카톤) 케이스.
+   * 있으면 cargoCbm 함수가 W×L×H×Q 대신 이 값을 사용 (CT 박스 부피 명시용).
+   * 없으면 박스 사이즈 W×L×H×Q 계산값으로 폴백.
+   */
+  cbm?: number;
+  /**
    * 박스별 화물 종류 (선택). 미지정이면 cargo.cargoType 사용.
    * 같은 cargo 안에서 박스마다 다른 종류 (예: PL 2개 + CT 1개) 표현 가능.
    * 알고리즘은 `splitCargoesByUnitCargoType` 으로 cargoType 별로 cargo 를 분리해
@@ -138,7 +144,12 @@ export function calcSystemCbm(c: {
 }): number {
   if (c.unitSizes && c.unitSizes.length > 0) {
     return c.unitSizes.reduce(
-      (sum, u) => sum + (u.width * u.length * u.height * u.quantity) / 1_000_000,
+      (sum, u) =>
+        sum +
+        // 사용자 직접 입력 cbm 우선 (CT 박스 — 사이즈 없는 카톤 케이스). 없으면 W×L×H×Q 폴백.
+        (typeof u.cbm === "number" && u.cbm > 0
+          ? u.cbm
+          : (u.width * u.length * u.height * u.quantity) / 1_000_000),
       0,
     );
   }
