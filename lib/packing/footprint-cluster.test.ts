@@ -319,6 +319,50 @@ describe("footprint-cluster: 옵션 비활성", () => {
   });
 });
 
+describe("footprint-cluster: 룰 H — 단독 부킹 큰 발바닥 묶음", () => {
+  it("KJF 패턴 — 같은 cargoId 다른 크기 2박스도 바닥 한 줄 묶음으로 먼저 배치", () => {
+    const cont = {
+      index: 1,
+      spec: SPEC_40FT,
+      packState: makeContainerState(),
+    };
+    const units: UnitItem[] = [
+      mkUnit({
+        unitId: "kjf-small",
+        cargoId: "sg-5-35",
+        bookingNo: "FBSIN260539",
+        width: 136,
+        length: 136,
+        height: 72,
+        weight: 0,
+      }),
+      mkUnit({
+        unitId: "kjf-big",
+        cargoId: "sg-5-35",
+        bookingNo: "FBSIN260539",
+        width: 166,
+        length: 166,
+        height: 83,
+        weight: 0,
+      }),
+    ];
+    const placed = preClusterFootprint(cont, units, { minUnits: 2, soloFootprintBundle: true });
+    assert.equal(placed.size, 2, "두 박스 모두 atomic 으로 선배치");
+    assert.equal(cont.packState.placements.length, 2);
+    assert.ok(cont.packState.placements.every((p) => p.position.z === 0));
+  });
+
+  it("같은 booking 에 다른 cargoId 가 있으면 단독 부킹 룰 H 발동 X", () => {
+    const units: UnitItem[] = [
+      mkUnit({ unitId: "u1", cargoId: "solo", bookingNo: "BK-H", width: 160, length: 160, height: 80 }),
+      mkUnit({ unitId: "u2", cargoId: "solo", bookingNo: "BK-H", width: 150, length: 150, height: 80 }),
+      mkUnit({ unitId: "u3", cargoId: "other", bookingNo: "BK-H", width: 100, length: 100, height: 80 }),
+    ];
+    const bundles = __testables.groupSoloFootprintBundles(units);
+    assert.equal(bundles.length, 0, "booking 전체가 한 cargoId 일 때만 발동");
+  });
+});
+
 describe("footprint-cluster: 룰 E — cross-cargoId 묶음 (같은 booking + 정확히 동일 사이즈)", () => {
   it("VPHI 패턴 — 같은 booking, 114×114×71 박스 7개 (3 cargo) → 두 컬럼 3단 적층 (6박스), v24 2박스는 정식 wrapper로", () => {
     const cont = {

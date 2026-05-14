@@ -44,6 +44,11 @@
  *     12) 최종 placement strictStackAudit 통과 (활성 조건 5+6+7 모두 적층 단계마다 재검증)
  *   사례: SK GEO CENTRIC 137×115×85 + 135×115×129×2 같은 booking, footprint W 차이 2cm.
  *
+ * 룰 H — 단독 부킹 큰 발바닥 묶음 (bigSoloFootprintBundle, 2026-05-14 추가):
+ *   같은 cargoId 안 정사각형에 가까운 큰 바닥면 unit 2~3개가 하나의 단독 booking 으로만 들어온 경우,
+ *   일반 큐가 작은 박스로 바닥을 조각내기 전에 z=0 한 줄 묶음으로 먼저 배치한다.
+ *   서로 다른 크기도 허용하되 같은 cargoId/booking atomic 을 유지한다.
+ *
  * 활성 조건 (보수적):
  *   1) 컨테이너 spec.maxCbm ≥ 50 m³ (40FT급)
  *   2) 그 컨테이너에 cluster 후보 unit 풀 ≥ 5개
@@ -89,6 +94,11 @@ export interface FootprintClusterOptions {
    * 손 실험 X=326 패턴 자동화. 기본 ON. false 면 기존 EP 자연 배치.
    */
   deepAnchor?: boolean;
+  /**
+   * 룰 H — 단독 부킹 큰 발바닥 묶음.
+   * 기본 ON. false 면 실험/회귀 확인용으로 끈다.
+   */
+  soloFootprintBundle?: boolean;
 }
 
 interface ContainerLike {
@@ -117,6 +127,29 @@ interface CrossCargoBundle {
   height: number;
 }
 
+/** 룰 H — 단독 부킹 큰 발바닥 묶음 */
+interface SoloFootprintBundle {
+  cargoId: string;
+  bookingNo: string;
+  units: UnitItem[];
+}
+
+interface SoloLayoutMember {
+  unit: UnitItem;
+  faceIdx: number;
+  size: { width: number; length: number; height: number };
+  offsetX: number;
+  offsetY: number;
+}
+
+interface SoloLayout {
+  axis: "x" | "y";
+  width: number;
+  length: number;
+  height: number;
+  members: SoloLayoutMember[];
+}
+
 /** 룰 E 활성 — 같은 그룹 안 unit 최소 개수 (작은 묶음은 룰 A 가 처리) */
 const CROSS_CARGO_MIN_UNITS = 3;
 
@@ -128,6 +161,12 @@ const NEAR_MAX_COLUMNS = 2;
 const NEAR_MIN_UNITS = 2;
 /** 룰 F — 컨테이너 당 시도할 최대 booking 수 (성능 보호) */
 const NEAR_MAX_BOOKINGS_PER_CONTAINER = 8;
+/** 룰 H — 큰 발바닥으로 볼 최소 바닥면적. 1.5m² = 15000cm² */
+const SOLO_FOOTPRINT_MIN_AREA_CM2 = 15_000;
+/** 룰 H — 긴 막대형 회귀 방지용 바닥 비율. 0.9면 거의 정사각형만 통과 */
+const SOLO_FOOTPRINT_MIN_RATIO = 0.9;
+/** 룰 H — 단독 부킹 묶음 최대 unit 수 (성능·회귀 보호) */
+const SOLO_MAX_UNITS = 3;
 
 /** footprint 가 두 unit 간 동일한지 (회전 미고려, ±FOOTPRINT_TOL_CM) */
 function sameFootprint(a: UnitItem, b: UnitItem): boolean {
@@ -141,6 +180,235 @@ function sameFootprint(a: UnitItem, b: UnitItem): boolean {
 /** 룰 E — 두 unit 의 W·L·H 가 정확히 같은지 (회전 미고려) */
 function exactSameSize(a: UnitItem, b: UnitItem): boolean {
   return a.width === b.width && a.length === b.length && a.height === b.height;
+}
+
+function rawFootprintArea(u: UnitItem): number {
+  return u.width * u.length;
+}
+
+function rawFootprintRatio(u: UnitItem): number {
+  const longer = Math.max(u.width, u.length);
+  if (longer <= 0) return 0;
+  return Math.min(u.width, u.length) / longer;
+}
+
+function boxesOverlap2D(
+  a: { x: number; y: number; width: number; length: number },
+  b: { x: number; y: number; width: number; length: number },
+): boolean {
+  return (
+    a.x + a.width > b.x + 0.01 &&
+    a.x + 0.01 < b.x + b.width &&
+    a.y + a.length > b.y + 0.01 &&
+    a.y + 0.01 < b.y + b.length
+  );
+}
+
+function groupSoloFootprintBundles(units: UnitItem[]): SoloFootprintBundle[] {
+  const bookingUnitCount = new Map<string, number>();
+  const byCargo = new Map<string, UnitItem[]>();
+  for (const u of units) {
+    if (u.bookingNo) {
+      bookingUnitCount.set(u.bookingNo, (bookingUnitCount.get(u.bookingNo) ?? 0) + 1);
+    }
+    const list = byCargo.get(u.cargoId) ?? [];
+    list.push(u);
+    byCargo.set(u.cargoId, list);
+  }
+
+  const bundles: SoloFootprintBundle[] = [];
+  for (const [cargoId, group] of byCargo) {
+    if (group.length < 2 || group.length > SOLO_MAX_UNITS) continue;
+    const bookingNo = group[0].bookingNo;
+    if (!bookingNo) continue;
+    if (group.some((u) => u.bookingNo !== bookingNo)) continue;
+    if ((bookingUnitCount.get(bookingNo) ?? 0) !== group.length) continue;
+    if (group.some((u) => u.remarks.topOnly || u.remarks.noStacking)) continue;
+    if (group.some((u) => rawFootprintArea(u) < SOLO_FOOTPRINT_MIN_AREA_CM2)) continue;
+    if (group.some((u) => rawFootprintRatio(u) < SOLO_FOOTPRINT_MIN_RATIO)) continue;
+    bundles.push({
+      cargoId,
+      bookingNo,
+      units: group
+        .slice()
+        .sort((a, b) => rawFootprintArea(b) - rawFootprintArea(a) || b.height - a.height),
+    });
+  }
+  bundles.sort(
+    (a, b) =>
+      b.units.reduce((s, u) => s + rawFootprintArea(u), 0) -
+      a.units.reduce((s, u) => s + rawFootprintArea(u), 0),
+  );
+  return bundles;
+}
+
+function buildSoloLayouts(bundle: SoloFootprintBundle, spec: ContainerSpec): SoloLayout[] {
+  const faceLists = bundle.units.map((u) => allowedFaces(u));
+  const layouts: SoloLayout[] = [];
+  const visit = (idx: number, faces: number[]) => {
+    if (idx >= bundle.units.length) {
+      const sizes = bundle.units.map((u, i) => effectiveSizeFace(u, faces[i]));
+      const addLayout = (axis: "x" | "y") => {
+        let offsetX = 0;
+        let offsetY = 0;
+        const members: SoloLayoutMember[] = [];
+        for (let i = 0; i < bundle.units.length; i++) {
+          const size = sizes[i];
+          members.push({ unit: bundle.units[i], faceIdx: faces[i], size, offsetX, offsetY });
+          if (axis === "x") offsetX += size.width;
+          else offsetY += size.length;
+        }
+        const layout: SoloLayout =
+          axis === "x"
+            ? {
+                axis,
+                width: sizes.reduce((s, size) => s + size.width, 0),
+                length: Math.max(...sizes.map((size) => size.length)),
+                height: Math.max(...sizes.map((size) => size.height)),
+                members,
+              }
+            : {
+                axis,
+                width: Math.max(...sizes.map((size) => size.width)),
+                length: sizes.reduce((s, size) => s + size.length, 0),
+                height: Math.max(...sizes.map((size) => size.height)),
+                members,
+              };
+        if (
+          layout.width <= spec.innerWidth + 0.01 &&
+          layout.length <= spec.innerLength + 0.01 &&
+          layout.height <= spec.innerHeight + 0.01
+        ) {
+          layouts.push(layout);
+        }
+      };
+      addLayout("x");
+      addLayout("y");
+      return;
+    }
+    for (const faceIdx of faceLists[idx]) visit(idx + 1, [...faces, faceIdx]);
+  };
+  visit(0, []);
+  layouts.sort(
+    (a, b) =>
+      a.width * a.length - b.width * b.length ||
+      a.height - b.height ||
+      a.width - b.width ||
+      a.length - b.length ||
+      a.axis.localeCompare(b.axis),
+  );
+  return layouts;
+}
+
+function tryPlaceSoloFootprintBundle(
+  bundle: SoloFootprintBundle,
+  state: ContainerPackState,
+  spec: ContainerSpec,
+  deepAnchor: boolean,
+): Set<string> {
+  const placedIds = new Set<string>();
+  const totalWeight = bundle.units.reduce((sum, u) => sum + u.weight, 0);
+  if (state.totalWeight + totalWeight > spec.maxWeightKg + 0.01) return placedIds;
+
+  const layouts = buildSoloLayouts(bundle, spec);
+  if (layouts.length === 0) return placedIds;
+
+  const candidatesForLayout = (layout: SoloLayout) => {
+    const seen = new Set<string>();
+    return [
+      { x: 0, y: 0, z: 0 },
+      { x: spec.innerWidth - layout.width, y: 0, z: 0 },
+      { x: 0, y: spec.innerLength - layout.length, z: 0 },
+      { x: spec.innerWidth - layout.width, y: spec.innerLength - layout.length, z: 0 },
+      ...state.candidates,
+    ]
+      .filter((p) => Math.abs(p.z) <= 0.01)
+      .filter((p) => {
+        const key = `${Math.round(p.x * 100)}:${Math.round(p.y * 100)}:${Math.round(p.z * 100)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => (deepAnchor ? b.y - a.y : a.y - b.y) || a.x - b.x);
+  };
+
+  for (const layout of layouts) {
+    for (const base of candidatesForLayout(layout)) {
+      if (base.x + layout.width > spec.innerWidth + 0.01) continue;
+      if (base.y + layout.length > spec.innerLength + 0.01) continue;
+
+      const newBoxes: Array<{ member: SoloLayoutMember; x: number; y: number }> = [];
+      let ok = true;
+      for (const member of layout.members) {
+        const x = base.x + member.offsetX;
+        const y = base.y + member.offsetY;
+        const box = { x, y, width: member.size.width, length: member.size.length };
+        for (const p of state.placements) {
+          if (
+            boxesOverlap2D(box, {
+              x: p.position.x,
+              y: p.position.y,
+              width: p.size.width,
+              length: p.size.length,
+            }) &&
+            member.size.height > p.position.z + 0.01
+          ) {
+            ok = false;
+            break;
+          }
+        }
+        if (!ok) break;
+        for (const placed of newBoxes) {
+          if (
+            boxesOverlap2D(box, {
+              x: placed.x,
+              y: placed.y,
+              width: placed.member.size.width,
+              length: placed.member.size.length,
+            })
+          ) {
+            ok = false;
+            break;
+          }
+        }
+        if (!ok) break;
+        newBoxes.push({ member, x, y });
+      }
+      if (!ok) continue;
+
+      for (const placed of newBoxes) {
+        const { member, x, y } = placed;
+        const u = member.unit;
+        const p: Placement3D = {
+          unitId: u.unitId,
+          cargoId: u.cargoId,
+          shipper: u.shipper,
+          bookingNo: u.bookingNo,
+          name: u.name,
+          cargoType: u.cargoType,
+          cfsCbm: u.cfsCbm,
+          position: { x, y, z: 0 },
+          size: member.size,
+          faceIdx: member.faceIdx,
+          rotated: member.faceIdx !== 0,
+          weight: u.weight,
+          remarks: u.remarks,
+          layer: "bottom",
+        };
+        state.placements.push(p);
+        state.totalWeight += u.weight;
+        state.visualCbm += (member.size.width * member.size.length * member.size.height) / 1_000_000;
+        state.candidates.push(
+          { x: x + member.size.width, y, z: 0 },
+          { x, y: y + member.size.length, z: 0 },
+          { x, y, z: member.size.height },
+        );
+        placedIds.add(u.unitId);
+      }
+      return placedIds;
+    }
+  }
+  return placedIds;
 }
 
 /**
@@ -1185,8 +1453,23 @@ export function preClusterFootprint(
     for (const id of placed) placedIds.add(id);
   }
 
+  // 룰 H — 단독 부킹 큰 발바닥 묶음. 거의 정사각형 큰 발바닥만 바닥 자리를 먼저 확보한다.
+  if (options?.soloFootprintBundle !== false) {
+    const soloBundles = groupSoloFootprintBundles(eligible.filter((u) => !placedIds.has(u.unitId)));
+    for (const bundle of soloBundles) {
+      if (bundle.units.some((u) => placedIds.has(u.unitId))) continue;
+      const placed = tryPlaceSoloFootprintBundle(
+        bundle,
+        containerLike.packState,
+        containerLike.spec,
+        deepAnchor,
+      );
+      for (const id of placed) placedIds.add(id);
+    }
+  }
+
   // 룰 A — 부킹 내부 footprint 컬럼 묶기 (캐시 사용 — packBest 매트릭스 재호출 가속)
-  // 룰 E 에서 이미 처리된 unit 은 풀에서 제외
+  // 룰 E/H 에서 이미 처리된 unit 은 풀에서 제외
   const eligibleForA = eligible.filter((u) => !placedIds.has(u.unitId));
   const columns = cachedGroupFootprintColumns(eligibleForA);
   if (columns.length === 0) {
@@ -1749,6 +2032,8 @@ export function preClusterRowLane(
 export const __testables = {
   sameFootprint,
   exactSameSize,
+  groupSoloFootprintBundles,
+  tryPlaceSoloFootprintBundle,
   groupFootprintColumns,
   groupCrossCargoBundles,
   tryPlaceCrossCargoBundle,

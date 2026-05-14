@@ -405,6 +405,65 @@ function decideContainers(
   ];
 }
 
+/**
+ * candidateUnion에서 실제 적재 검증용으로 시도할 컨테이너 후보 셋.
+ *
+ * decideContainers는 "부피상 가장 작은 셋" 하나를 고른다. 하지만 긴 화물처럼
+ * 부피는 충분해도 직선 바닥 자리가 부족한 경우가 있어, 실제 pack 검증 단계에서는
+ * 같은 컨테이너 수의 더 넓은 셋과 한 단계 큰 셋까지 보수적으로 시험한다.
+ * 후보 채택은 뒤의 isValid6 lex 검증이 결정하므로 여기서는 샘플명을 보지 않는다.
+ */
+function generateCandidateContainerSets(
+  totalCbm: number,
+  mode: ContainerMode,
+): ContainerType[][] {
+  const cbm20 = getContainerCbm(CONTAINERS["20FT"]);
+  const cbm40 = getContainerCbm(CONTAINERS["40FT"]);
+  const soft = CONTAINER_SOFT_OVERFLOW_RATIO;
+
+  const base = decideContainers(totalCbm, 0, mode);
+  const maxContainers = Math.max(1, base.length + 1);
+  const candidates: ContainerType[][] = [];
+
+  const add = (n40: number, n20: number): void => {
+    const count = n40 + n20;
+    if (count === 0 || count > maxContainers) return;
+    const capacity = n40 * cbm40 + n20 * cbm20;
+    if (capacity * soft + 0.001 < totalCbm) return;
+    candidates.push([
+      ...Array.from<ContainerType>({ length: n40 }, () => "40FT"),
+      ...Array.from<ContainerType>({ length: n20 }, () => "20FT"),
+    ]);
+  };
+
+  if (mode === "20ft_only") {
+    for (let n20 = 1; n20 <= maxContainers; n20++) add(0, n20);
+  } else if (mode === "40ft_only") {
+    for (let n40 = 1; n40 <= maxContainers; n40++) add(n40, 0);
+  } else {
+    for (let n40 = 0; n40 <= maxContainers; n40++) {
+      for (let n20 = 0; n20 <= maxContainers; n20++) add(n40, n20);
+    }
+  }
+
+  const keyOf = (types: ContainerType[]): string => types.slice().sort().join("|");
+  const unique = new Map<string, ContainerType[]>();
+  for (const candidate of candidates) {
+    const key = keyOf(candidate);
+    if (!unique.has(key)) unique.set(key, candidate);
+  }
+
+  return [...unique.values()].sort((a, b) => {
+    if (a.length !== b.length) return a.length - b.length;
+    const capA = a.reduce((s, t) => s + getContainerCbm(CONTAINERS[t]), 0);
+    const capB = b.reduce((s, t) => s + getContainerCbm(CONTAINERS[t]), 0);
+    if (capA !== capB) return capA - capB;
+    const fortyA = a.filter((t) => t === "40FT").length;
+    const fortyB = b.filter((t) => t === "40FT").length;
+    return fortyB - fortyA;
+  });
+}
+
 function makeContainer(index: number, spec: ContainerSpec): ContainerState {
   return {
     index,
@@ -645,6 +704,9 @@ export interface PackOptions {
     | "ldf"
     | "input"
     | "longest-side"
+    | "long-cargo-first"
+    | "largest-footprint-first"
+    | "no-stacking-first"
     | "tallest"
     | "widest"
     | "shortest"
@@ -1206,8 +1268,20 @@ type ResidualTarget = Point3D & {
     axis: "x" | "y" | "z";
     count: number;
     unitSize: { width: number; length: number; height: number };
+    members?: Array<{
+      unitId: string;
+      faceIdx: number;
+      offsetX: number;
+      offsetY: number;
+      offsetZ: number;
+      size: { width: number; length: number; height: number };
+    }>;
   };
 };
+
+type ResidualBundleMember = NonNullable<
+  NonNullable<ResidualTarget["bundle"]>["members"]
+>[number];
 
 function unitVolumeCbm(u: UnitItem): number {
   return (u.width * u.length * u.height) / 1_000_000;
@@ -1344,8 +1418,22 @@ function generateResidualTargets(
       Math.round(box.x * 100),
       Math.round(box.y * 100),
       Math.round(box.z * 100),
+      Math.round(size.width * 100),
+      Math.round(size.length * 100),
+      Math.round(size.height * 100),
       conflictCargoIds.join(","),
-      bundle ? `${bundle.axis}x${bundle.count}` : "single",
+      bundle
+        ? `${bundle.axis}x${bundle.count}:${
+            bundle.members
+              ?.map(
+                (m) =>
+                  `${m.unitId}/${m.faceIdx}/${Math.round(m.offsetX * 100)}/${Math.round(
+                    m.offsetY * 100,
+                  )}/${Math.round(m.offsetZ * 100)}`,
+              )
+              .join("|") ?? "same"
+          }`
+        : "single",
     ].join(":");
     if (seen.has(key)) return;
     seen.add(key);
@@ -1377,7 +1465,8 @@ function generateResidualTargets(
   // [bundleTargets opt-in] qty≥2 cargo 의 묶음 자리 target 추가.
   // 모든 unit 의 raw 크기 동일할 때만 활성 (atomic 적층 안전성).
   if (bundleTargets && units.length >= 2) {
-    const u0 = units[0];
+    const orderedUnits = [...units].sort((a, b) => unitVolumeCm3(b) - unitVolumeCm3(a));
+    const u0 = orderedUnits[0];
     const allSame = units.every(
       (u) =>
         Math.abs(u.width - u0.width) < STACK_EPS &&
@@ -1431,6 +1520,90 @@ function generateResidualTargets(
           }
         }
       }
+    }
+
+    // 크기가 다른 같은 cargoId unit 도 바닥에서 한 덩어리로 볼 수 있어야 한다.
+    // 예: 136×136×72 1개 + 166×166×83 1개는 폭으로는 못 붙어도 길이 방향 직렬 배치가 가능하다.
+    if (!allSame && orderedUnits.length <= 3) {
+      const faceLists = orderedUnits.map((u) => allowedFaces(u));
+      const visitFaces = (idx: number, picked: number[]) => {
+        if (idx >= orderedUnits.length) {
+          const memberSizes = orderedUnits.map((u, i) => effectiveSizeFace(u, picked[i]));
+          const noStack = orderedUnits.some((u) => u.remarks?.noStacking);
+          const addHeteroBundle = (axis: "x" | "y" | "z") => {
+            if (axis === "z" && noStack) return;
+            let offsetX = 0;
+            let offsetY = 0;
+            let offsetZ = 0;
+            const members: ResidualBundleMember[] = [];
+            for (let i = 0; i < orderedUnits.length; i++) {
+              const size = memberSizes[i];
+              members.push({
+                unitId: orderedUnits[i].unitId,
+                faceIdx: picked[i],
+                offsetX,
+                offsetY,
+                offsetZ,
+                size,
+              });
+              if (axis === "x") offsetX += size.width;
+              else if (axis === "y") offsetY += size.length;
+              else offsetZ += size.height;
+            }
+            const bundleSize =
+              axis === "x"
+                ? {
+                    width: memberSizes.reduce((s, size) => s + size.width, 0),
+                    length: Math.max(...memberSizes.map((size) => size.length)),
+                    height: Math.max(...memberSizes.map((size) => size.height)),
+                  }
+                : axis === "y"
+                  ? {
+                      width: Math.max(...memberSizes.map((size) => size.width)),
+                      length: memberSizes.reduce((s, size) => s + size.length, 0),
+                      height: Math.max(...memberSizes.map((size) => size.height)),
+                    }
+                  : {
+                      width: Math.max(...memberSizes.map((size) => size.width)),
+                      length: Math.max(...memberSizes.map((size) => size.length)),
+                      height: memberSizes.reduce((s, size) => s + size.height, 0),
+                    };
+            if (
+              bundleSize.width > cont.spec.innerWidth + STACK_EPS ||
+              bundleSize.length > cont.spec.innerLength + STACK_EPS ||
+              bundleSize.height > cont.spec.innerHeight + STACK_EPS
+            ) {
+              return;
+            }
+            const bundleInfo: ResidualTarget["bundle"] = {
+              axis,
+              count: orderedUnits.length,
+              unitSize: members[0].size,
+              members,
+            };
+            addTarget(members[0].faceIdx, bundleSize, 0, 0, 0, bundleInfo);
+            addTarget(members[0].faceIdx, bundleSize, cont.spec.innerWidth - bundleSize.width, 0, 0, bundleInfo);
+            addTarget(members[0].faceIdx, bundleSize, 0, cont.spec.innerLength - bundleSize.length, 0, bundleInfo);
+            addTarget(
+              members[0].faceIdx,
+              bundleSize,
+              cont.spec.innerWidth - bundleSize.width,
+              cont.spec.innerLength - bundleSize.length,
+              0,
+              bundleInfo,
+            );
+            for (const p of cont.packState.placements) {
+              addTarget(members[0].faceIdx, bundleSize, p.position.x + p.size.width, p.position.y, p.position.z, bundleInfo);
+              addTarget(members[0].faceIdx, bundleSize, p.position.x, p.position.y + p.size.length, p.position.z, bundleInfo);
+            }
+          };
+          addHeteroBundle("x");
+          addHeteroBundle("y");
+          return;
+        }
+        for (const faceIdx of faceLists[idx]) visitFaces(idx + 1, [...picked, faceIdx]);
+      };
+      visitFaces(0, []);
     }
   }
 
@@ -1528,18 +1701,33 @@ function placeCargoUnitsInContainer(
   if (firstTarget && remaining.length > 0) {
     if (firstTarget.bundle) {
       // [bundleTargets] 묶음 target — N unit 모두 axis 방향 오프셋에 강제 배치
-      const { axis, count, unitSize } = firstTarget.bundle;
+      const { axis, count, unitSize, members } = firstTarget.bundle;
       if (remaining.length < count) {
         restorePackState(cont.packState, snap);
         return false;
       }
-      for (let i = 0; i < count; i++) {
-        const u = remaining[i];
-        const offsetX = axis === "x" ? firstTarget.x + unitSize.width * i : firstTarget.x;
-        const offsetY = axis === "y" ? firstTarget.y + unitSize.length * i : firstTarget.y;
-        const offsetZ = axis === "z" ? firstTarget.z + unitSize.height * i : firstTarget.z;
+      const placedUnitIds = new Set<string>();
+      const bundleMembers =
+        members ??
+        Array.from({ length: count }, (_, i) => ({
+          unitId: remaining[i]?.unitId ?? "",
+          faceIdx: firstTarget.faceIdx,
+          offsetX: axis === "x" ? unitSize.width * i : 0,
+          offsetY: axis === "y" ? unitSize.length * i : 0,
+          offsetZ: axis === "z" ? unitSize.height * i : 0,
+          size: unitSize,
+        }));
+      for (const member of bundleMembers) {
+        const u = remaining.find((candidate) => candidate.unitId === member.unitId);
+        if (!u) {
+          restorePackState(cont.packState, snap);
+          return false;
+        }
+        const offsetX = firstTarget.x + member.offsetX;
+        const offsetY = firstTarget.y + member.offsetY;
+        const offsetZ = firstTarget.z + member.offsetZ;
         const placed = tryPlaceUnit(u, cont.packState, cont.spec, {
-          forceFaceIdx: firstTarget.faceIdx,
+          forceFaceIdx: member.faceIdx,
           scoreFn: (cand) =>
             Math.abs(cand.x - offsetX) < STACK_EPS &&
             Math.abs(cand.y - offsetY) < STACK_EPS &&
@@ -1551,8 +1739,9 @@ function placeCargoUnitsInContainer(
           restorePackState(cont.packState, snap);
           return false;
         }
+        placedUnitIds.add(u.unitId);
       }
-      remaining = remaining.slice(count);
+      remaining = remaining.filter((u) => !placedUnitIds.has(u.unitId));
     } else {
       const first = remaining[0];
       const targetPlaced = tryPlaceUnit(first, cont.packState, cont.spec, {
@@ -2066,6 +2255,72 @@ export function pack(
           const la = Math.max(a.width, a.length, a.height);
           const lb = Math.max(b.width, b.length, b.height);
           return lb - la;
+        }
+        case "long-cargo-first": {
+          // 긴 화물 먼저 — 긴 직선 바닥 자리를 초반에 확보.
+          const la = Math.max(a.width, a.length, a.height);
+          const lb = Math.max(b.width, b.length, b.height);
+          if (lb !== la) return lb - la;
+          const fpa = Math.max(
+            a.width * a.length,
+            a.width * a.height,
+            a.length * a.height,
+          );
+          const fpb = Math.max(
+            b.width * b.length,
+            b.width * b.height,
+            b.length * b.height,
+          );
+          if (fpb !== fpa) return fpb - fpa;
+          const va = a.width * a.length * a.height;
+          const vb = b.width * b.length * b.height;
+          if (vb !== va) return vb - va;
+          return b.weight - a.weight;
+        }
+        case "largest-footprint-first": {
+          // 바닥면 후보가 큰 화물 먼저 — 큰 발바닥이 작은 화물에 잘리는 상황 방지.
+          const fpa = Math.max(
+            a.width * a.length,
+            a.width * a.height,
+            a.length * a.height,
+          );
+          const fpb = Math.max(
+            b.width * b.length,
+            b.width * b.height,
+            b.length * b.height,
+          );
+          if (fpb !== fpa) return fpb - fpa;
+          const va = a.width * a.length * a.height;
+          const vb = b.width * b.length * b.height;
+          if (vb !== va) return vb - va;
+          const longA = Math.max(a.width, a.length, a.height);
+          const longB = Math.max(b.width, b.length, b.height);
+          if (longB !== longA) return longB - longA;
+          return b.weight - a.weight;
+        }
+        case "no-stacking-first": {
+          // 다단금지 화물 먼저 — 위에 올릴 수 없는 바닥 자리를 먼저 확보.
+          const na = a.remarks.noStacking ? 1 : 0;
+          const nb = b.remarks.noStacking ? 1 : 0;
+          if (nb !== na) return nb - na;
+          const fpa = Math.max(
+            a.width * a.length,
+            a.width * a.height,
+            a.length * a.height,
+          );
+          const fpb = Math.max(
+            b.width * b.length,
+            b.width * b.height,
+            b.length * b.height,
+          );
+          if (fpb !== fpa) return fpb - fpa;
+          const va = a.width * a.length * a.height;
+          const vb = b.width * b.length * b.height;
+          if (vb !== va) return vb - va;
+          const longA = Math.max(a.width, a.length, a.height);
+          const longB = Math.max(b.width, b.length, b.height);
+          if (longB !== longA) return longB - longA;
+          return b.weight - a.weight;
         }
         case "tallest":
           return b.height - a.height;
@@ -3852,8 +4107,10 @@ export function packBestWithCandidateUnion(
   // 3) 후보 union — decideContainers 두 번 + 첫 시도 셋
   const declared = debug.userDeclaredTotalCbm;
   const physical = debug.physicalTotalCbm;
-  const candDeclared = declared > 0 ? decideContainers(declared, 0, mode) : [];
-  const candPhysical = physical > 0 ? decideContainers(physical, 0, mode) : [];
+  const candDeclared =
+    declared > 0 ? generateCandidateContainerSets(declared, mode) : [];
+  const candPhysical =
+    physical > 0 ? generateCandidateContainerSets(physical, mode) : [];
 
   const candKey = (c: ContainerType[]): string =>
     c.slice().sort().join("|");
@@ -3863,9 +4120,12 @@ export function packBestWithCandidateUnion(
     const key = candKey(c);
     if (!uniqueByKey.has(key)) uniqueByKey.set(key, c);
   };
-  addCandidate(candDeclared);
-  addCandidate(candPhysical);
+  for (const cand of candDeclared) addCandidate(cand);
+  for (const cand of candPhysical) addCandidate(cand);
   addCandidate(initialCand);
+  if (initial.alternative?.containers?.length) {
+    addCandidate(initial.alternative.containers.map((c) => c.spec.type));
+  }
 
   // 4) 정렬 — 컨 수 asc → 총 capacity asc (작은 셋 우선)
   const capacityOf = (c: ContainerType[]): number =>
@@ -4005,9 +4265,12 @@ export const __testables = {
   expandToUnits,
   classify,
   decideContainers,
+  generateCandidateContainerSets,
+  generateResidualTargets,
   orderForCompleted,
   allocateBulkGroup,
   cargoCbm,
+  getDeclaredCbmForContainerDecision,
   cargoTotalWeight,
   DEFAULT_REMARK,
 };

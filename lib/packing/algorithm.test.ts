@@ -9,7 +9,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import type { CargoSpec, Remark } from "../../types/cargo.ts";
-import { pack } from "./algorithm.ts";
+import { pack, __testables } from "./algorithm.ts";
+import { getContainerSpec } from "./containers.ts";
+import { makeContainerState } from "./extreme-point.ts";
 
 // 헬퍼: 기본 리마크 (테스트 가독성을 위한 로컬 사본)
 const baseRemark: Remark = {
@@ -162,6 +164,44 @@ describe("pack — 중량조건 (heavierBelow)", () => {
   });
 });
 
+describe("pack — 병렬 탐색용 안전 정렬 후보", () => {
+  for (const sortStrategy of [
+    "long-cargo-first",
+    "largest-footprint-first",
+    "no-stacking-first",
+  ] as const) {
+    it(`${sortStrategy} 정렬도 미배치 없이 물리 규칙을 유지한다`, () => {
+      const cargoes = [
+        makeCargo({
+          id: "long",
+          width: 360,
+          length: 80,
+          height: 70,
+          weightPerUnit: 300,
+        }),
+        makeCargo({
+          id: "wide",
+          width: 160,
+          length: 150,
+          height: 50,
+          weightPerUnit: 200,
+        }),
+        makeCargo({
+          id: "no-stack",
+          width: 110,
+          length: 110,
+          height: 80,
+          weightPerUnit: 150,
+          remarks: { ...baseRemark, noStacking: true },
+        }),
+      ];
+      const result = pack(cargoes, "40ft_only", { sortStrategy });
+      assert.equal(result.containers.length, 1);
+      assert.equal(result.unplaced.length, 0);
+    });
+  }
+});
+
 describe("pack — 사이즈 우선 분류 (cargoType 보조)", () => {
   it("사이즈 없는 CT (w=0/l=0/h=0, aboutCbm 만) → 시각 X, ctCbm 에 합산", () => {
     const cargoes = [
@@ -263,6 +303,71 @@ describe("pack — 입고완료 시각 배치", () => {
     );
     // summary.completedTotalCbm 은 사용자 입력 CBM(c.cbm) 합으로 정보 표시
     assert.equal(result.summary.completedTotalCbm, 25);
+  });
+});
+
+describe("residualMakeRoom — 묶음 target", () => {
+  it("크기가 다른 같은 화물 2박스도 길이 방향 묶음 후보를 만든다", () => {
+    const cont = {
+      index: 1,
+      spec: getContainerSpec("40FT"),
+      packState: makeContainerState(),
+      ctCbm: 0,
+      completedCbm: 0,
+      bulkItems: [],
+    };
+    const units = [
+      {
+        unitId: "kjf-big",
+        cargoId: "sg-5-35",
+        shipper: "KJF",
+        cargoType: "CT",
+        cfsCbm: null,
+        width: 166,
+        length: 166,
+        height: 83,
+        weight: 0,
+        remarks: { ...baseRemark, orientation: "fixed" },
+      },
+      {
+        unitId: "kjf-small",
+        cargoId: "sg-5-35",
+        shipper: "KJF",
+        cargoType: "CT",
+        cfsCbm: null,
+        width: 136,
+        length: 136,
+        height: 72,
+        weight: 0,
+        remarks: { ...baseRemark, orientation: "fixed" },
+      },
+    ];
+    const targets = __testables.generateResidualTargets(cont, units, 100, true);
+    const serialTarget = targets.find(
+      (t) =>
+        t.bundle?.axis === "y" &&
+        t.bundle.members?.length === 2 &&
+        Math.round(t.size.width) === 166 &&
+        Math.round(t.size.length) === 302 &&
+        t.bundle.members[0].unitId === "kjf-big" &&
+        t.bundle.members[1].unitId === "kjf-small",
+    );
+    assert.ok(serialTarget, "136cm 박스와 166cm 박스를 한 줄로 묶는 후보가 필요");
+  });
+});
+
+describe("candidateUnion — 물리 검증용 컨테이너 후보", () => {
+  it("부피상 40FT+20FT가 가능해도 같은 2대 조합의 40FT+40FT 후보를 함께 만든다", () => {
+    const candidates = __testables.generateCandidateContainerSets(73.78, "auto");
+    const keys = candidates.map((c) => c.slice().sort().join("|"));
+    assert.ok(keys.includes("20FT|40FT"));
+    assert.ok(keys.includes("40FT|40FT"));
+  });
+
+  it("softCap 안쪽이면 60m³를 조금 넘는 화물도 40FT 단독 후보를 만든다", () => {
+    const candidates = __testables.generateCandidateContainerSets(60.03, "auto");
+    const keys = candidates.map((c) => c.slice().sort().join("|"));
+    assert.ok(keys.includes("40FT"));
   });
 });
 
