@@ -1,0 +1,23 @@
+# 10 샘플 종합 회귀 — strict visual + residualMakeRoom + bundleTargets + booking-cluster
+date: 2026-05-13T12:12:24.177Z
+
+| sample | 컨 셋 | visual | bulk | size→bulk | unpl | cargoSpl | bookSpl | audit | softCbm | hardCbm | wtOver | pack(s) | 결과 |
+|---|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---|
+| mangjak | 40FT+20FT | 15 | 4 | 0 | 2 | 0 | 0 | P | 0 | 0 | 0 | 67.8 | ❌ |
+  unplaced: mangjak-1,mangjak-10
+| sg-1 | 40FT+20FT | 21 | 0 | 0 | 1 | 0 | 0 | P | 0 | 0 | 0 | 17.1 | ❌ |
+  unplaced: sg-1-14
+| sg-2 | 40FT+40FT | 20 | 3 | 0 | 0 | 0 | 0 | P | 0 | 0 | 0 | 0.0 | ✅ |
+| sg-3 | 40FT+40FT | 28 | 6 | 0 | 1 | 0 | 0 | P | 0 | 0 | 0 | 78.5 | ❌ |
+  unplaced: sg-3-5
+| sg-4 | 40FT+40FT+40FT | 49 | 5 | 0 | 0 | 0 | 0 | P | 0 | 0 | 0 | 86.3 | ✅ |
+| sg-5 | 40FT+40FT | 33 | 2 | 0 | 2 | 0 | 0 | P | 0 | 0 | 0 | 82.5 | ❌ |
+  unplaced: sg-5-35
+| hm-1 | 40FT+20FT | 13 | 21 | 0 | 0 | 0 | 0 | P | 1 | 0 | 0 | 0.0 | ✅ |
+| hm-2 | 40FT+40FT+20FT | 20 | 6 | 0 | 0 | 0 | 0 | P | 0 | 0 | 0 | 1.2 | ✅ |
+| hm-3 | 40FT+20FT | 15 | 4 | 0 | 0 | 0 | 0 | P | 1 | 0 | 0 | 1.3 | ✅ |
+| hm-4 | 40FT+40FT+20FT | 23 | 19 | 0 | 0 | 0 | 0 | P | 1 | 0 | 0 | 1.7 | ✅ |
+(node:818396) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/napda/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/clpclaude/lib/packing/algorithm.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\Users\napda\OneDrive\바탕 화면\clpclaude\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)

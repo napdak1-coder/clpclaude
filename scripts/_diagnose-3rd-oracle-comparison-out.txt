@@ -1,0 +1,81 @@
+=== 3차 1단계: 실무자 답안 오라클 vs 시스템 strict visual 결과 비교 ===
+date: 2026-05-13T07:42:57.425Z
+
+## mangjak (망작 SG)
+- target / practitioner containerSet: 40FT
+- system strict visual containerSet:  40FT+20FT ❌ 다름
+- pack 시간: 4.9s
+- 미배치: 1 unit (1 cargo)
+
+### unplaced cargo 별 실무자 답안 위치 ↔ 시스템 미배치 비교
+
+  [mangjak-10] 화주="에이스나노켐" W110 L110 H80 ×1 booking=FBSIN260394
+    실무자 답안 위치 → 컨1 40FT (전체 화물)
+    시스템 시도 위치 → 어디도 배치 못 함 (전 컨 시도 후 실패)
+    실무자 답안: 전체 화물 컨1 40FT 단독. 시스템 분포: 컨1,미
+
+## sg-1 (1ST SG)
+- target / practitioner containerSet: 40FT+20FT
+- system strict visual containerSet:  40FT+20FT ✅ 같음
+- pack 시간: 14.5s
+- 미배치: 7 unit (2 cargo)
+
+### unplaced cargo 별 실무자 답안 위치 ↔ 시스템 미배치 비교
+
+  [sg-1-13] 화주="SUNGBO INDUSTRIA" W100 L100 H50 ×3 booking=FBSIN260362
+    실무자 답안 위치 → 컨1 40FT
+    시스템 시도 위치 → 어디도 배치 못 함 (전 컨 시도 후 실패)
+    실무자 답안 같은 컨 화주들 (17명): 메가젠임플란트, 데코론, YKMC, 보현석재, 에이제이테크, 카페봄봄, EXCELERATE ENERGY, VISCOSMO, 더블유티 스프레이, 리만...
+    → 시스템에서 이 화주들이 흩어진 컨: 컨2,컨1,미, 분산 화주 수: 0
+
+  [sg-1-4] 화주="보현석재" W180 L90 H27 ×4 booking=FBSIN260326
+    실무자 답안 위치 → 컨1 40FT
+    시스템 시도 위치 → 어디도 배치 못 함 (전 컨 시도 후 실패)
+    실무자 답안 같은 컨 화주들 (17명): 메가젠임플란트, 데코론, YKMC, 보현석재, 에이제이테크, 카페봄봄, EXCELERATE ENERGY, VISCOSMO, 더블유티 스프레이, 리만...
+    → 시스템에서 이 화주들이 흩어진 컨: 컨2,컨1,미, 분산 화주 수: 0
+
+## sg-4 (4ST SG)
+- target / practitioner containerSet: 40FT+40FT+40FT
+- system strict visual containerSet:  40FT+40FT+40FT ✅ 같음
+- pack 시간: 26.5s
+- 미배치: 8 unit (1 cargo)
+
+### unplaced cargo 별 실무자 답안 위치 ↔ 시스템 미배치 비교
+
+  [sg-4-47] 화주="나토상사" W119 L119 H128 ×8 booking=FBSIN260434
+    실무자 답안 위치 → 컨3 40FT
+    시스템 시도 위치 → 어디도 배치 못 함 (전 컨 시도 후 실패)
+    실무자 답안 같은 컨 화주들 (15명): 나토, CMOS 청강, CMOS 호성이레테, CMOS 대림바스, CMOS 삼화정밀, CMOS CDC, 코오롱(SUPERTRAIN), 나토상사, 반도텍, 나라켐...
+    → 시스템에서 이 화주들이 흩어진 컨: 컨1,컨2,미,컨3, 분산 화주 수: 2
+
+## sg-5 (5ST SG)
+- target / practitioner containerSet: 40FT+40FT
+- system strict visual containerSet:  40FT+40FT ✅ 같음
+- pack 시간: 53.8s
+- 미배치: 16 unit (3 cargo)
+
+### unplaced cargo 별 실무자 답안 위치 ↔ 시스템 미배치 비교
+
+  [sg-5-1] 화주="YKMC" W118 L114 H59 ×8 booking=FBSIN260497
+    실무자 답안 위치 → 컨1 40FT
+    시스템 시도 위치 → 어디도 배치 못 함 (전 컨 시도 후 실패)
+    실무자 답안 같은 컨 화주들 (17명): YKMC, 솔텍, 민서코팅, 아성플라스틱밸브, TPG (티피지), 더젬코리아, 베스프코리아, 카고러쉬, 나라켐, 태원니들...
+    → 시스템에서 이 화주들이 흩어진 컨: 미,컨1,컨2, 분산 화주 수: 1
+
+  [sg-5-2] 화주="솔텍" W117 L111 H103 ×3 booking=FBSIN260501
+    실무자 답안 위치 → 컨1 40FT
+    시스템 시도 위치 → 어디도 배치 못 함 (전 컨 시도 후 실패)
+    실무자 답안 같은 컨 화주들 (17명): YKMC, 솔텍, 민서코팅, 아성플라스틱밸브, TPG (티피지), 더젬코리아, 베스프코리아, 카고러쉬, 나라켐, 태원니들...
+    → 시스템에서 이 화주들이 흩어진 컨: 미,컨1,컨2, 분산 화주 수: 1
+
+  [sg-5-7] 화주="베스프코리아" W111 L111 H107 ×5 booking=FBSIN260532
+    실무자 답안 위치 → 컨1 40FT
+    시스템 시도 위치 → 어디도 배치 못 함 (전 컨 시도 후 실패)
+    실무자 답안 같은 컨 화주들 (17명): YKMC, 솔텍, 민서코팅, 아성플라스틱밸브, TPG (티피지), 더젬코리아, 베스프코리아, 카고러쉬, 나라켐, 태원니들...
+    → 시스템에서 이 화주들이 흩어진 컨: 미,컨1,컨2, 분산 화주 수: 1
+
+
+=== 종합 관찰 ===
+1. 망작 SG: 실무자 40FT 1대 / 시스템 strict visual 컨 셋 비교 → 컨 셋 차이 자체가 핵심
+2. sg-1, sg-4, sg-5: 컨 셋이 같다면 실무자가 어떤 cargo 를 어느 컨에 묶었는지가 단서
+3. 화주 분산 (실무자는 같은 컨, 시스템은 다른 컨) 이 많으면 묶음/순서 룰 문제 의심

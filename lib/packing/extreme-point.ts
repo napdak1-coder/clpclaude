@@ -157,6 +157,16 @@ export interface PackExtremePointOptions {
    * 지정한 face 가 allowedFaces 에 없으면 placement 실패.
    */
   forceFaceIdx?: number;
+  /**
+   * 컨테이너 벽 anchor 후보 추가 (opt-in).
+   *
+   * 기본 false. true 면 박스 배치 후 후보 좌표 갱신 시 컨테이너 벽 (x=0, y=0)
+   * 에 미끄러뜨린 anchor 좌표 4개 추가 — 큰 footprint cargo 가 벽쪽에 박힐
+   * 자리를 만들어 줌. production 영향 0 (옵션 미지정 시 기본 동작 그대로).
+   *
+   * 사용처: residualMakeRoom 의 placeCargoUnitsInContainer 등 실험 경로.
+   */
+  enableWallProjection?: boolean;
 }
 
 /* ============================================================
@@ -534,7 +544,19 @@ export function tryPlaceUnit(
     { x: bx, y: projectMaxY(bx, bz + bh), z: bz + bh },
   ];
 
-  for (const nc of [...baseCands, ...projCands]) {
+  // [opt-in] enableWallProjection — 컨테이너 벽 anchor 후보 4개 추가.
+  // 큰 footprint cargo 가 벽쪽 자리를 못 찾는 케이스용 (sg-1-14 / sg-5-35 같은).
+  // baseCands / projCands 와 함께 후보 풀에 추가. production 영향 0 (default false).
+  const wallCands: Candidate[] = options?.enableWallProjection
+    ? [
+        { x: 0, y: by + bl, z: bz },                      // 왼쪽 벽 + placement 뒤
+        { x: 0, y: by, z: bz },                            // 왼쪽 벽 + placement 같은 row (있을 수 있음)
+        { x: bx + bw, y: 0, z: bz },                       // 앞쪽 벽 + placement 옆
+        { x: bx, y: 0, z: bz },                            // 앞쪽 벽 + placement 같은 column
+      ]
+    : [];
+
+  for (const nc of [...baseCands, ...projCands, ...wallCands]) {
     if (nc.x >= spec.innerWidth - EPS) continue;
     if (nc.y >= spec.innerLength - EPS) continue;
     if (nc.z >= spec.innerHeight - EPS) continue;

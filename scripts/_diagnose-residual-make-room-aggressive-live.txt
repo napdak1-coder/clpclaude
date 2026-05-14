@@ -1,0 +1,13 @@
+# residualMakeRoom 공격적 config — sg-5 sg-5-35 해결 시도
+date: 2026-05-13T10:40:14.367Z
+
+| config | unplaced | unplaced cargo | bookingSplit | cargoSplit | audit | hardCbm | weightOver | pack(s) |
+|---|---:|---|---:|---:|---|---:|---:|---:|
+| base (3/12/50/60s) | 1 | sg-5-35 | 0 | 0 | PASS | 0 | 0 | 90.9 |
+| agg-A (4/16/80/120s) | 1 | sg-5-35 | 0 | 0 | PASS | 0 | 0 | 75.3 |
+| agg-B (5/20/120/180s) | 1 | sg-5-35 | 0 | 0 | PASS | 0 | 0 | 118.0 |
+| agg-C (3/12/200/180s) | 1 | sg-5-35 | 0 | 0 | PASS | 0 | 0 | 39.7 |
+(node:776952) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/napda/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/clpclaude/lib/packing/algorithm.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\Users\napda\OneDrive\바탕 화면\clpclaude\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)

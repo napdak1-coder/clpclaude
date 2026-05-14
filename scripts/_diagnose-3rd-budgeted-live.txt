@@ -1,0 +1,57 @@
+=== 3차 budgeted single-strategy experiment matrix ===
+date: 2026-05-13T08:52:53.002Z
+timeout: 60s/실험, softCap=1.05
+
+| sample | exp | 컨 셋 | mode | unpl | cargoSpl | bookSpl | audit | softCbm | hardCbm | wtOver | pack(s) | timeout |
+|---|---|---|---|---:|---:|---:|---|---:|---:|---:|---:|:---:|
+| mangjak | E0-single | 40FT+20FT | pack-ldf | 1 | 0 | 0 | P | 0 | 0 | 0 | 3.1 |  |
+  unplaced: mangjak-10
+| mangjak | E1-bigCargo | 40FT+20FT | pack-bigCargo | 2 | 0 | 0 | P | 0 | 0 | 0 | 11.2 |  |
+  unplaced: mangjak-1,mangjak-10
+| mangjak | E2-cu+bigCargo | 40FT+20FT | candidateUnion | 2 | 0 | 0 | P | 0 | 0 | 0 | 0.3 |  |
+  unplaced: mangjak-1,mangjak-10
+| mangjak | E3-bookingCluster | 40FT+20FT | pack-booking | 2 | 0 | 0 | P | 0 | 0 | 0 | 0.2 |  |
+  unplaced: mangjak-1,mangjak-10
+| sg-1 | E0-single | 40FT+20FT | pack-ldf | 7 | 0 | 0 | P | 0 | 0 | 0 | 10.9 |  |
+  unplaced: sg-1-13,sg-1-4
+| sg-1 | E1-bigCargo | 40FT+20FT | pack-bigCargo | 1 | 0 | 0 | P | 0 | 0 | 0 | 5.8 |  |
+  unplaced: sg-1-14
+| sg-1 | E2-cu+bigCargo | 40FT+20FT | candidateUnion | 1 | 0 | 0 | P | 0 | 0 | 0 | 0.1 |  |
+  unplaced: sg-1-14
+| sg-1 | E3-bookingCluster | 40FT+20FT | pack-booking | 1 | 0 | 0 | P | 0 | 0 | 0 | 0.0 |  |
+  unplaced: sg-1-14
+| sg-4 | E0-single | 40FT+40FT+40FT | pack-ldf | 8 | 0 | 0 | P | 0 | 0 | 0 | 25.3 |  |
+  unplaced: sg-4-47
+| sg-4 | E1-bigCargo | 40FT+40FT+40FT | pack-bigCargo | 1 | 0 | 0 | P | 0 | 0 | 0 | 61.8 | TIME |
+  unplaced: sg-4-4
+| sg-4 | E2-cu+bigCargo | 40FT+40FT+40FT | candidateUnion | 1 | 0 | 0 | P | 0 | 0 | 0 | 2.5 |  |
+  unplaced: sg-4-4
+| sg-4 | E3-bookingCluster | 40FT+40FT+40FT | pack-booking | 1 | 0 | 0 | P | 0 | 0 | 0 | 36.7 |  |
+  unplaced: sg-4-4
+| sg-5 | E0-single | 40FT+40FT | pack-ldf | 16 | 0 | 0 | P | 0 | 0 | 0 | 50.9 |  |
+  unplaced: sg-5-1,sg-5-2,sg-5-7
+| sg-5 | E1-bigCargo | 40FT+40FT | pack-bigCargo | 6 | 0 | 0 | P | 0 | 0 | 0 | 50.6 |  |
+  unplaced: sg-5-17,sg-5-22,sg-5-25,sg-5-28,sg-5-30,sg-5-32
+| sg-5 | E2-cu+bigCargo | 40FT+40FT | candidateUnion | 6 | 0 | 0 | P | 0 | 0 | 0 | 13.7 |  |
+  unplaced: sg-5-17,sg-5-22,sg-5-25,sg-5-28,sg-5-30,sg-5-32
+| sg-5 | E3-bookingCluster | 40FT+40FT | pack-booking | 3 | 0 | 0 | P | 0 | 0 | 0 | 27.0 |  |
+  unplaced: sg-5-17,sg-5-35
+
+=== 종합 (샘플별 미배치 추이) ===
+[mangjak] E0=1 → E1=2 → E2=2 → E3=2
+[sg-1] E0=7 → E1=1 → E2=1 → E3=1
+[sg-4] E0=8 → E1=1(T) → E2=1 → E3=1
+[sg-5] E0=16 → E1=6 → E2=6 → E3=3
+
+=== 미구현 실험 (별도 알고리즘 작업 필요) ===
+- E4 adjacent lane (기존 룰 G 부분 동작, 일반화 X)
+- E5 rotation retry (실패 cargo 한정 6면 재시도 fallback)
+- E6 gap-fill (잔여 공간 탐색 패스)
+- E7 limited LNS (destroy & reconstruct)
+- E8 lightweight EP fallback (Moving EP / Maximal Space)
+
+--- saved to C:\Users\napda\OneDrive\바탕 화면\clpclaude\scripts\_diagnose-3rd-budgeted-experiments-out.txt ---
+(node:724800) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/napda/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/clpclaude/lib/packing/algorithm.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\Users\napda\OneDrive\바탕 화면\clpclaude\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)

@@ -1,0 +1,118 @@
+=== A1 — CBM overflow 정밀 추적 (망작 / 4ST SG / 1ST HM) ===
+date: 2026-05-13T08:01:29.976Z
+SOFT_OVERFLOW = 1.05 (allocateBulkGroup 안 운영 정책)
+
+## mangjak (망작 SG)
+- 컨 셋: 40FT+20FT
+
+  컨1 40FT: 적재=60.032 / max=60 / softCap=63.00 m³
+    visualCbm=0.000, ctCbm=60.032, completedCbm=0.000
+    overflow=+0.032 m³ (0.1%)
+    상태: ⚠ SOFT overflow (maxCbm 초과, softCap 안)
+    --- 컨1 안 cargo (visual + bulk) ---
+    visual cargo: 0건
+    bulk cargo (CT/입고완료): 21건
+      mangjak-1: 이 컨에 0.932 m³ (cargoTotal=0.932), cfsCbm=0.932, aboutCbm=0.932, cbmSource=(undef), group=ct
+      mangjak-2: 이 컨에 6.536 m³ (cargoTotal=6.536), cfsCbm=6.536, aboutCbm=6.536, cbmSource=(undef), group=ct
+      mangjak-3: 이 컨에 1.369 m³ (cargoTotal=1.369), cfsCbm=1.369, aboutCbm=1.369, cbmSource=(undef), group=ct
+      mangjak-4: 이 컨에 2.931 m³ (cargoTotal=2.931), cfsCbm=2.931, aboutCbm=2.931, cbmSource=(undef), group=ct
+      mangjak-5: 이 컨에 0.823 m³ (cargoTotal=0.823), cfsCbm=0.823, aboutCbm=0.823, cbmSource=(undef), group=ct
+      mangjak-6: 이 컨에 0.717 m³ (cargoTotal=0.717), cfsCbm=0.717, aboutCbm=0.717, cbmSource=(undef), group=ct
+      mangjak-7: 이 컨에 2.079 m³ (cargoTotal=2.079), cfsCbm=2.079, aboutCbm=2.079, cbmSource=(undef), group=ct
+      mangjak-8: 이 컨에 1.099 m³ (cargoTotal=1.099), cfsCbm=1.099, aboutCbm=1.099, cbmSource=(undef), group=ct
+      mangjak-9: 이 컨에 0.292 m³ (cargoTotal=0.292), cfsCbm=0.292, aboutCbm=0.292, cbmSource=(undef), group=ct
+      mangjak-10: 이 컨에 1.004 m³ (cargoTotal=1.004), cfsCbm=1.004, aboutCbm=1.004, cbmSource=(undef), group=ct
+      ... 11건 더
+
+  컨2 20FT: 적재=0.000 / max=28 / softCap=29.40 m³
+    visualCbm=0.000, ctCbm=0.000, completedCbm=0.000
+    overflow=-28.000 m³ (-100.0%)
+    상태: ✅ within maxCbm
+
+## sg-4 (4ST SG)
+- 컨 셋: 40FT+40FT+40FT
+
+  컨1 40FT: 적재=60.879 / max=60 / softCap=63.00 m³
+    visualCbm=0.000, ctCbm=60.879, completedCbm=0.000
+    overflow=+0.879 m³ (1.5%)
+    상태: ⚠ SOFT overflow (maxCbm 초과, softCap 안)
+    --- 컨1 안 cargo (visual + bulk) ---
+    visual cargo: 0건
+    bulk cargo (CT/입고완료): 28건
+      sg-4-1: 이 컨에 7.067 m³ (cargoTotal=7.067), cfsCbm=7.067, aboutCbm=7.067, cbmSource=(undef), group=ct
+      sg-4-2: 이 컨에 2.014 m³ (cargoTotal=2.014), cfsCbm=2.014, aboutCbm=2.014, cbmSource=(undef), group=ct
+      sg-4-3: 이 컨에 2.650 m³ (cargoTotal=2.650), cfsCbm=2.65, aboutCbm=2.65, cbmSource=(undef), group=ct
+      sg-4-4: 이 컨에 2.618 m³ (cargoTotal=2.618), cfsCbm=2.618, aboutCbm=2.618, cbmSource=(undef), group=ct
+      sg-4-5: 이 컨에 5.607 m³ (cargoTotal=5.607), cfsCbm=5.607, aboutCbm=5.607, cbmSource=(undef), group=ct
+      sg-4-6: 이 컨에 2.447 m³ (cargoTotal=2.447), cfsCbm=2.447, aboutCbm=2.447, cbmSource=(undef), group=ct
+      sg-4-7: 이 컨에 7.914 m³ (cargoTotal=7.914), cfsCbm=7.914, aboutCbm=7.914, cbmSource=(undef), group=ct
+      sg-4-8: 이 컨에 6.465 m³ (cargoTotal=6.465), cfsCbm=6.465, aboutCbm=6.465, cbmSource=(undef), group=ct
+      sg-4-9: 이 컨에 2.906 m³ (cargoTotal=2.906), cfsCbm=2.906, aboutCbm=2.906, cbmSource=(undef), group=ct
+      sg-4-10: 이 컨에 1.388 m³ (cargoTotal=1.388), cfsCbm=1.388, aboutCbm=1.388, cbmSource=(undef), group=ct
+      ... 18건 더
+
+  컨2 40FT: 적재=62.151 / max=60 / softCap=63.00 m³
+    visualCbm=0.000, ctCbm=62.151, completedCbm=0.000
+    overflow=+2.151 m³ (3.6%)
+    상태: ⚠ SOFT overflow (maxCbm 초과, softCap 안)
+    --- 컨2 안 cargo (visual + bulk) ---
+    visual cargo: 0건
+    bulk cargo (CT/입고완료): 16건
+      sg-4-29: 이 컨에 7.842 m³ (cargoTotal=7.842), cfsCbm=7.842, aboutCbm=7.842, cbmSource=(undef), group=ct
+      sg-4-30: 이 컨에 1.010 m³ (cargoTotal=1.010), cfsCbm=1.01, aboutCbm=1.01, cbmSource=(undef), group=ct
+      sg-4-31: 이 컨에 4.549 m³ (cargoTotal=4.549), cfsCbm=4.549, aboutCbm=4.549, cbmSource=(undef), group=ct
+      sg-4-32: 이 컨에 16.896 m³ (cargoTotal=16.896), cfsCbm=16.896, aboutCbm=16.896, cbmSource=(undef), group=ct
+      sg-4-33: 이 컨에 1.655 m³ (cargoTotal=1.655), cfsCbm=1.655, aboutCbm=1.655, cbmSource=(undef), group=ct
+      sg-4-34: 이 컨에 0.621 m³ (cargoTotal=0.621), cfsCbm=0.621, aboutCbm=0.621, cbmSource=(undef), group=ct
+      sg-4-35: 이 컨에 1.670 m³ (cargoTotal=1.670), cfsCbm=1.67, aboutCbm=1.67, cbmSource=(undef), group=ct
+      sg-4-36: 이 컨에 5.305 m³ (cargoTotal=5.305), cfsCbm=5.305, aboutCbm=5.305, cbmSource=(undef), group=ct
+      sg-4-37: 이 컨에 0.949 m³ (cargoTotal=0.949), cfsCbm=0.949, aboutCbm=0.949, cbmSource=(undef), group=ct
+      sg-4-38: 이 컨에 0.654 m³ (cargoTotal=0.654), cfsCbm=0.654, aboutCbm=0.654, cbmSource=(undef), group=ct
+      ... 6건 더
+
+  컨3 40FT: 적재=33.285 / max=60 / softCap=63.00 m³
+    visualCbm=0.000, ctCbm=33.285, completedCbm=0.000
+    overflow=-26.715 m³ (-44.5%)
+    상태: ✅ within maxCbm
+
+## hm-1 (1ST HM)
+- 컨 셋: 40FT+20FT
+
+  컨1 40FT: 적재=61.318 / max=60 / softCap=63.00 m³
+    visualCbm=0.000, ctCbm=61.318, completedCbm=0.000
+    overflow=+1.318 m³ (2.2%)
+    상태: ⚠ SOFT overflow (maxCbm 초과, softCap 안)
+    --- 컨1 안 cargo (visual + bulk) ---
+    visual cargo: 0건
+    bulk cargo (CT/입고완료): 24건
+      hm-1-1: 이 컨에 15.740 m³ (cargoTotal=15.740), cfsCbm=15.74, aboutCbm=15.74, cbmSource=(undef), group=ct
+      hm-1-2: 이 컨에 6.242 m³ (cargoTotal=6.242), cfsCbm=6.242, aboutCbm=6.242, cbmSource=(undef), group=ct
+      hm-1-3: 이 컨에 1.494 m³ (cargoTotal=1.494), cfsCbm=1.494, aboutCbm=1.494, cbmSource=(undef), group=ct
+      hm-1-4: 이 컨에 0.517 m³ (cargoTotal=0.517), cfsCbm=0.517, aboutCbm=0.517, cbmSource=(undef), group=ct
+      hm-1-5: 이 컨에 0.721 m³ (cargoTotal=0.721), cfsCbm=0.721, aboutCbm=0.721, cbmSource=(undef), group=ct
+      hm-1-6: 이 컨에 4.594 m³ (cargoTotal=4.594), cfsCbm=4.594, aboutCbm=4.594, cbmSource=(undef), group=ct
+      hm-1-7: 이 컨에 0.225 m³ (cargoTotal=0.225), cfsCbm=0.225, aboutCbm=0.225, cbmSource=(undef), group=ct
+      hm-1-8: 이 컨에 3.445 m³ (cargoTotal=3.445), cfsCbm=3.445, aboutCbm=3.445, cbmSource=(undef), group=ct
+      hm-1-9: 이 컨에 2.143 m³ (cargoTotal=2.143), cfsCbm=2.143, aboutCbm=2.143, cbmSource=(undef), group=ct
+      hm-1-10: 이 컨에 5.921 m³ (cargoTotal=5.921), cfsCbm=5.921, aboutCbm=5.921, cbmSource=(undef), group=ct
+      ... 14건 더
+
+  컨2 20FT: 적재=24.423 / max=28 / softCap=29.40 m³
+    visualCbm=0.000, ctCbm=24.423, completedCbm=0.000
+    overflow=-3.577 m³ (-12.8%)
+    상태: ✅ within maxCbm
+
+
+=== softCap 룰 위치 ===
+- lib/packing/algorithm.ts:446 — `const SOFT_OVERFLOW = 1.05` (allocateBulkGroup 안)
+- 운영 정책: maxCbm 60/28 은 보수적, 5% overflow 통상 허용, 부킹 묶음 보존 목적
+
+=== isValid6 / compareLex 기준 ===
+- algorithm.ts:3100 isValid6: `c.totalCbm + c.ctCbm > c.spec.maxCbm + 0.001` 면 invalid
+- algorithm.ts:3168 compareLex: 같은 검사로 cbmOverflow 카운트
+- **기준 불일치**: allocateBulkGroup softCap (1.05) ≠ isValid6 hard (1.0)
+
+=== production packBest vs candidateUnion 동작 ===
+- production packBest 단독: allocateBulkGroup softCap 1.05 적용 → CBM overflow 결과를 그대로 best 로 선택
+- candidateUnion (isValid6): maxCbm + 0.001 초과면 invalid → softCap 안 overflow 도 invalid
+- → 같은 결과도 두 경로에서 다르게 판정

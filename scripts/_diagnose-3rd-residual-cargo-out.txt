@@ -1,0 +1,56 @@
+# 3차 — 잔여 미배치 cargo 정밀 진단
+date: 2026-05-13T09:25:05.328Z
+engine: pack() with sortStrategy='booking-cluster-first', strictVisualClassification=true (read-only)
+
+## sg-1
+scenario: E8 candidateUnion + booking-cluster-first (성공 케이스)
+컨 셋: 40FT+20FT
+  컨1 40FT: 사용 50.40/60 (남은 9.60 m³, soft 추가 3.00) · 무게 남은 4.4 t
+  컨2 20FT: 사용 23.37/28 (남은 4.63 m³, soft 추가 1.40) · 무게 남은 16.0 t
+unplaced: 0 ✅
+
+## sg-4
+scenario: E3 base booking-cluster-first (잔여 미배치 진단)
+컨 셋: 40FT+40FT+40FT
+  컨1 40FT: 사용 58.28/60 (남은 1.72 m³, soft 추가 3.00) · 무게 남은 4.3 t
+  컨2 40FT: 사용 53.71/60 (남은 6.29 m³, soft 추가 3.00) · 무게 남은 5.3 t
+  컨3 40FT: 사용 38.22/60 (남은 21.78 m³, soft 추가 3.00) · 무게 남은 6.6 t
+unplaced: sg-4-4
+
+### sg-4-4
+  - W167 L117 H134 ×1
+  - weightPerUnit 1510kg / 총중량 1510kg
+  - CBM 2.618 m³ (단일 unit 2.618 m³ × 1)
+  - bookingNo: FBSIN260440, 화주: 수일
+  - bookingAnchor: 단독 cargo (같은 booking 없음)
+  - 컨별 fit 가능성:
+    컨1 40FT: ✅ 물리적 가능 (자리/배치 엔진 한계)
+    컨2 40FT: ✅ 물리적 가능 (자리/배치 엔진 한계)
+    컨3 40FT: ✅ 물리적 가능 (자리/배치 엔진 한계)
+
+## sg-5
+scenario: E3 base booking-cluster-first (잔여 미배치 진단)
+컨 셋: 40FT+40FT
+  컨1 40FT: 사용 44.11/60 (남은 15.89 m³, soft 추가 3.00) · 무게 남은 11.6 t
+  컨2 40FT: 사용 52.19/60 (남은 7.81 m³, soft 추가 3.00) · 무게 남은 6.9 t
+unplaced: sg-5-17, sg-5-35
+
+### sg-5-17
+  - W114 L99 H128 ×1
+  - weightPerUnit 455kg / 총중량 455kg
+  - CBM 1.445 m³ (단일 unit 1.445 m³ × 1)
+  - bookingNo: FBSIN260562, 화주: 삼성전자
+  - bookingAnchor: 단독 cargo (같은 booking 없음)
+  - 컨별 fit 가능성:
+    컨1 40FT: ✅ 물리적 가능 (자리/배치 엔진 한계)
+    컨2 40FT: ✅ 물리적 가능 (자리/배치 엔진 한계)
+
+### sg-5-35
+  - W136 L136 H72 ×2
+  - weightPerUnit 7500kg / 총중량 0kg
+  - CBM 3.619 m³ (단일 unit 1.332 m³ × 2)
+  - bookingNo: FBSIN260539, 화주: KJF
+  - bookingAnchor: 단독 cargo (같은 booking 없음)
+  - 컨별 fit 가능성:
+    컨1 40FT: ✅ 물리적 가능 (자리/배치 엔진 한계)
+    컨2 40FT: ✅ 물리적 가능 (자리/배치 엔진 한계)

@@ -1,0 +1,26 @@
+=== 3차 단계 1 — production packBest booking split 실측 ===
+date: 2026-05-13T10:14:15.129Z
+engine: packBest 단독 (production 기본 경로)
+
+| sample | rows | 컨 셋 | unpl | cargoSplit | **bookingSplit** | audit | cbmOver | wtOver | pack(s) |
+|---|---:|---|---:|---:|---:|---|---:|---:|---:|
+| mangjak | 21 | 40FT+20FT | 0 | 0 | **0** | PASS | 1 | 0 | 0.0 |
+| sg-1 | 22 | 40FT+20FT | 0 | 0 | **0** | PASS | 0 | 0 | 42.6 |
+| sg-2 | 23 | 40FT+40FT | 0 | 0 | **0** | PASS | 0 | 0 | 0.1 |
+| sg-3 | 35 | 40FT+40FT | 0 | 0 | **0** | PASS | 0 | 0 | 16.7 |
+| sg-4 | 54 | 40FT+40FT+40FT | 0 | 0 | **0** | PASS | 2 | 0 | 0.0 |
+| sg-5 | 36 | 40FT+40FT | 0 | 0 | **0** | PASS | 0 | 0 | 0.0 |
+| hm-1 | 34 | 40FT+20FT | 0 | 0 | **0** | PASS | 1 | 0 | 0.0 |
+| hm-2 | 26 | 40FT+40FT+20FT | 0 | 0 | **0** | PASS | 0 | 0 | 56.1 |
+| hm-3 | 19 | 40FT+20FT | 0 | 0 | **0** | PASS | 0 | 0 | 0.0 |
+| hm-4 | 41 | 40FT+40FT+20FT | 0 | 0 | **0** | PASS | 0 | 0 | 14.0 |
+
+=== 종합 ===
+- booking split 있음: ✅ NO
+- cargo split 있음:   ✅ NO
+- audit fail 있음:    ✅ NO
+- CBM overflow 있음:  ❌ YES
+- weight overflow:    ✅ NO
+
+=== 판정 ===
+❌ 절대 룰 위반 발견 — E0/E1/E2 실험 전 별도 보고 필요

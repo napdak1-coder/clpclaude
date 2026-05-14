@@ -1,0 +1,12 @@
+# 10 샘플 candidateUnion + singleStrategy + timeBudget + strict visual + residualMakeRoom
+date: 2026-05-14T01:16:17.483Z
+
+| sample | containerSet | strategy | unpl | unplaced | sizedToBulk | cargoSpl | bookSpl | audit | hardCbm | wtOver | pack(s) |
+|---|---|---|---:|---|---:|---:|---:|---|---:|---:|---:|
+| mangjak | 40FT | ldf | 1 | mangjak-10 | 0 | 0 | 0 | P | 0 | 0 | 157.1 |
+| sg-1 | 40FT+20FT | booking-cluster-first | 1 | sg-1-14 | 0 | 0 | 0 | P | 0 | 0 | 36.7 |
+| sg-2 | 40FT+40FT | booking-cluster-first | 0 | - | 0 | 0 | 0 | P | 0 | 0 | 20.6 |
+| sg-3 | 40FT+40FT | ldf | 0 | - | 0 | 0 | 0 | P | 0 | 0 | 239.3 |
+| sg-4 | 40FT+40FT+20FT | booking-cluster-first | 17 | sg-4-10,sg-4-15,sg-4-17,sg-4-18,sg-4-28,sg-4-33,sg-4-35,sg-4-4,sg-4-47,sg-4-54 | 0 | 0 | 0 | P | 0 | 0 | 653.2 |
+| sg-5 | 40FT+40FT | booking-cluster-first | 2 | sg-5-35 | 0 | 0 | 0 | P | 0 | 0 | 185.3 |
+| hm-1 | 40FT+20FT | booking-cluster-first | 0 | - | 0 | 0 | 0 | P | 0 | 0 | 0.0 |

@@ -1,0 +1,69 @@
+=== 3차 진단: strictVisualClassification=true 미배치 정밀 분석 ===
+date: 2026-05-13T07:24:41.732Z
+engine: pack() 직접 호출 (packBestWithCandidateUnion 미사용)
+
+## mangjak (망작 SG) — 21 행
+pack 시간: 4.0s
+컨테이너:
+  컨1 40FT: CBM 59.96/60 (남은 0.04 m³) · 무게 14.5/25.0 t (남은 10.5 t)
+  컨2 20FT: CBM 0.00/28 (남은 28.00 m³) · 무게 0.0/21.0 t (남은 21.0 t)
+미배치 1 개 cargo:
+  mangjak-10: W110 L110 H80 ×1 (0.968 m³, 500 kg) booking=FBSIN260394
+    → 실패 원인: collision / no fit (시각 배치 엔진 한계)
+
+## sg-1 (1ST SG) — 22 행
+pack 시간: 11.5s
+컨테이너:
+  컨1 40FT: CBM 46.48/60 (남은 13.52 m³) · 무게 16.1/25.0 t (남은 8.9 t)
+  컨2 20FT: CBM 21.63/28 (남은 6.37 m³) · 무게 5.3/21.0 t (남은 15.7 t)
+미배치 2 개 cargo:
+  sg-1-13: W100 L100 H50 ×3 (1.500 m³, 6000 kg) booking=FBSIN260362
+    → 실패 원인: collision / no fit (시각 배치 엔진 한계)
+  sg-1-4: W180 L90 H27 ×4 (4.157 m³, 0 kg) booking=FBSIN260326
+    → 실패 원인: collision / no fit (시각 배치 엔진 한계)
+
+## sg-4 (4ST SG) — 54 행
+pack 시간: 25.9s
+컨테이너:
+  컨1 40FT: CBM 52.98/60 (남은 7.02 m³) · 무게 18.7/25.0 t (남은 6.3 t)
+  컨2 40FT: CBM 43.50/60 (남은 16.50 m³) · 무게 21.2/25.0 t (남은 3.8 t)
+  컨3 40FT: CBM 41.98/60 (남은 18.02 m³) · 무게 14.9/25.0 t (남은 10.1 t)
+미배치 1 개 cargo:
+  sg-4-47: W119 L119 H128 ×8 (14.364 m³, 5400 kg) booking=FBSIN260434
+    → 실패 원인: collision / no fit (시각 배치 엔진 한계)
+
+## sg-5 (5ST SG) — 36 행
+pack 시간: 52.5s
+컨테이너:
+  컨1 40FT: CBM 42.47/60 (남은 17.53 m³) · 무게 13.0/25.0 t (남은 12.0 t)
+  컨2 40FT: CBM 40.19/60 (남은 19.81 m³) · 무게 15.9/25.0 t (남은 9.1 t)
+미배치 3 개 cargo:
+  sg-5-1: W118 L114 H59 ×8 (6.349 m³, 2872 kg) booking=FBSIN260497
+    → 실패 원인: collision / no fit (시각 배치 엔진 한계)
+  sg-5-2: W117 L111 H103 ×3 (4.085 m³, 2200 kg) booking=FBSIN260501
+    → 실패 원인: collision / no fit (시각 배치 엔진 한계)
+  sg-5-7: W111 L111 H107 ×5 (8.267 m³, 5458 kg) booking=FBSIN260532
+    → 실패 원인: collision / no fit (시각 배치 엔진 한계)
+
+=== 종합 ===
+mangjak: 미배치 1 unit pack=4.0s
+  - mangjak-10: collision / no fit (시각 배치 엔진 한계)
+sg-1: 미배치 7 unit pack=11.5s
+  - sg-1-13: collision / no fit (시각 배치 엔진 한계)
+  - sg-1-4: collision / no fit (시각 배치 엔진 한계)
+sg-4: 미배치 8 unit pack=25.9s
+  - sg-4-47: collision / no fit (시각 배치 엔진 한계)
+sg-5: 미배치 16 unit pack=52.5s
+  - sg-5-1: collision / no fit (시각 배치 엔진 한계)
+  - sg-5-2: collision / no fit (시각 배치 엔진 한계)
+  - sg-5-7: collision / no fit (시각 배치 엔진 한계)
+
+=== 실패 원인 분류 표 ===
+- collision / no fit (시각 배치 엔진 한계): 7건
+    · mangjak:mangjak-10
+    · sg-1:sg-1-13
+    · sg-1:sg-1-4
+    · sg-4:sg-4-47
+    · sg-5:sg-5-1
+    · sg-5:sg-5-2
+    · sg-5:sg-5-7

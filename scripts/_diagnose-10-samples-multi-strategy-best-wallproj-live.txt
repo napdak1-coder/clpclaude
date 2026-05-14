@@ -1,0 +1,26 @@
+# 10 샘플 multi-strategy best 자동 선택 (strict visual + residualMakeRoom)
+date: 2026-05-13T13:06:57.003Z
+
+| sample | best strategy | 컨 셋 | unpl | unplCids | cargoSpl | bookSpl | audit | hardCbm | wtOver | sizedToBulk | pack(s) | 결과 |
+|---|---|---|---:|---|---:|---:|---|---:|---:|---:|---:|---|
+| mangjak | ldf | 40FT+20FT | 1 | mangjak-10 | 0 | 0 | P | 0 | 0 | 0 | 225.8 | ❌ |
+| sg-1 | booking-cluster-first | 40FT+20FT | 1 | sg-1-14 | 0 | 0 | P | 0 | 0 | 0 | 75.7 | ❌ |
+| sg-2 | ldf | 40FT+40FT | 0 | - | 0 | 0 | P | 0 | 0 | 0 | 0.0 | ✅ |
+| sg-3 | ldf | 40FT+40FT | 0 | - | 0 | 0 | P | 0 | 0 | 0 | 15.7 | ✅ |
+| sg-4 | booking-cluster-first | 40FT+40FT+40FT | 0 | - | 0 | 0 | P | 0 | 0 | 0 | 184.5 | ✅ |
+| sg-5 | booking-cluster-first | 40FT+40FT | 2 | sg-5-35 | 0 | 0 | P | 0 | 0 | 0 | 380.5 | ❌ |
+| hm-1 | ldf | 40FT+20FT | 0 | - | 0 | 0 | P | 0 | 0 | 0 | 0.0 | ✅ |
+| hm-2 | ldf | 40FT+40FT+20FT | 0 | - | 0 | 0 | P | 0 | 0 | 0 | 0.6 | ✅ |
+| hm-3 | ldf | 40FT+20FT | 0 | - | 0 | 0 | P | 0 | 0 | 0 | 6.1 | ✅ |
+| hm-4 | ldf | 40FT+40FT+20FT | 0 | - | 0 | 0 | P | 0 | 0 | 0 | 1.6 | ✅ |
+
+## 종합
+- 통과: 7/10
+- 잔여:
+    mangjak (ldf): unpl=1 cargos=mangjak-10
+    sg-1 (booking-cluster-first): unpl=1 cargos=sg-1-14
+    sg-5 (booking-cluster-first): unpl=2 cargos=sg-5-35
+(node:839900) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/napda/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/clpclaude/lib/packing/algorithm.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\Users\napda\OneDrive\바탕 화면\clpclaude\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)

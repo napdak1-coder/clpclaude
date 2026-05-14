@@ -1,0 +1,228 @@
+=== 10 샘플 classify read-only trace ===
+date: 2026-05-13T07:04:37.618Z
+
+[mangjak] 망작 SG
+  totalRows                   : 21
+  allHaveCbm                  : true   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 17
+  unitSizes 있는 행 수        : 9
+  size 있는 행 (전체)         : 17
+  c.cbm 채워진 행 수          : 21
+  c.cbm ≈ 계산값 인 행 수     : 13   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+20FT
+  visual rows 총합            : 0
+  bulkItems 총합              : 21
+  unplaced 총 수량            : 0
+  visual 로 간 cargoId 5개    : (없음)
+  CT bulk 로 간 cargoId 5개   : mangjak-1, mangjak-2, mangjak-3, mangjak-4, mangjak-5
+  size 있는데 CT 로 간 행 수  : 17   ← 룰 위반 후보
+     예시 5: mangjak-1(W110L110H73), mangjak-3(W74L74H70), mangjak-4(W183L76H169), mangjak-5(W110L110H68), mangjak-8(W76L66H73)
+  size 있는데 미배치 행 수    : 0
+
+[sg-1] 1ST SG
+  totalRows                   : 22
+  allHaveCbm                  : false   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 22
+  unitSizes 있는 행 수        : 6
+  size 있는 행 (전체)         : 22
+  c.cbm 채워진 행 수          : 13
+  c.cbm ≈ 계산값 인 행 수     : 12   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+20FT
+  visual rows 총합            : 14
+  bulkItems 총합              : 0
+  unplaced 총 수량            : 7
+  visual 로 간 cargoId 5개    : sg-1-9, sg-1-5, sg-1-18, sg-1-20, sg-1-22
+  CT bulk 로 간 cargoId 5개   : (없음)
+  size 있는데 CT 로 간 행 수  : 0   ← 룰 위반 후보
+  size 있는데 미배치 행 수    : 2
+     예시 5: sg-1-4, sg-1-13
+
+[sg-2] 2ST SG
+  totalRows                   : 23
+  allHaveCbm                  : false   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 20
+  unitSizes 있는 행 수        : 6
+  size 있는 행 (전체)         : 20
+  c.cbm 채워진 행 수          : 8
+  c.cbm ≈ 계산값 인 행 수     : 6   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+40FT
+  visual rows 총합            : 18
+  bulkItems 총합              : 3
+  unplaced 총 수량            : 0
+  visual 로 간 cargoId 5개    : sg-2-2, sg-2-19, sg-2-1, sg-2-8, sg-2-11
+  CT bulk 로 간 cargoId 5개   : sg-2-6, sg-2-18, sg-2-10
+  size 있는데 CT 로 간 행 수  : 0   ← 룰 위반 후보
+  size 있는데 미배치 행 수    : 0
+
+[sg-3] 3ST SG
+  totalRows                   : 35
+  allHaveCbm                  : false   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 29
+  unitSizes 있는 행 수        : 24
+  size 있는 행 (전체)         : 29
+  c.cbm 채워진 행 수          : 29
+  c.cbm ≈ 계산값 인 행 수     : 22   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+40FT
+  visual rows 총합            : 16
+  bulkItems 총합              : 6
+  unplaced 총 수량            : 0
+  visual 로 간 cargoId 5개    : sg-3-2, sg-3-13, sg-3-23, sg-3-25, sg-3-20
+  CT bulk 로 간 cargoId 5개   : sg-3-4, sg-3-9, sg-3-10, sg-3-14, sg-3-28
+  size 있는데 CT 로 간 행 수  : 0   ← 룰 위반 후보
+  size 있는데 미배치 행 수    : 0
+
+[sg-4] 4ST SG
+  totalRows                   : 54
+  allHaveCbm                  : true   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 49
+  unitSizes 있는 행 수        : 15
+  size 있는 행 (전체)         : 49
+  c.cbm 채워진 행 수          : 54
+  c.cbm ≈ 계산값 인 행 수     : 46   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+40FT+40FT
+  visual rows 총합            : 0
+  bulkItems 총합              : 54
+  unplaced 총 수량            : 0
+  visual 로 간 cargoId 5개    : (없음)
+  CT bulk 로 간 cargoId 5개   : sg-4-1, sg-4-2, sg-4-3, sg-4-4, sg-4-5
+  size 있는데 CT 로 간 행 수  : 49   ← 룰 위반 후보
+     예시 5: sg-4-1(W119L113H128), sg-4-2(W112L112H99), sg-4-3(W110L110H95), sg-4-4(W167L117H134), sg-4-5(W68L66H26)
+  size 있는데 미배치 행 수    : 0
+
+[sg-5] 5ST SG
+  totalRows                   : 36
+  allHaveCbm                  : true   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 34
+  unitSizes 있는 행 수        : 20
+  size 있는 행 (전체)         : 34
+  c.cbm 채워진 행 수          : 36
+  c.cbm ≈ 계산값 인 행 수     : 32   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+40FT
+  visual rows 총합            : 0
+  bulkItems 총합              : 36
+  unplaced 총 수량            : 0
+  visual 로 간 cargoId 5개    : (없음)
+  CT bulk 로 간 cargoId 5개   : sg-5-1, sg-5-2, sg-5-3, sg-5-4, sg-5-5
+  size 있는데 CT 로 간 행 수  : 34   ← 룰 위반 후보
+     예시 5: sg-5-1(W118L114H59), sg-5-2(W117L111H103), sg-5-3(W111L111H74), sg-5-4(W110L110H67), sg-5-5(W111L111H196)
+  size 있는데 미배치 행 수    : 0
+
+[hm-1] 1ST HM
+  totalRows                   : 34
+  allHaveCbm                  : true   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 13
+  unitSizes 있는 행 수        : 4
+  size 있는 행 (전체)         : 13
+  c.cbm 채워진 행 수          : 34
+  c.cbm ≈ 계산값 인 행 수     : 4   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+20FT
+  visual rows 총합            : 0
+  bulkItems 총합              : 34
+  unplaced 총 수량            : 0
+  visual 로 간 cargoId 5개    : (없음)
+  CT bulk 로 간 cargoId 5개   : hm-1-1, hm-1-2, hm-1-3, hm-1-4, hm-1-5
+  size 있는데 CT 로 간 행 수  : 13   ← 룰 위반 후보
+     예시 5: hm-1-3(W187L112H16), hm-1-4(W110L110H40), hm-1-11(W110L110H102), hm-1-14(W110L112H103), hm-1-16(W85L85H70)
+  size 있는데 미배치 행 수    : 0
+
+[hm-2] 2ST HM
+  totalRows                   : 26
+  allHaveCbm                  : false   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 20
+  unitSizes 있는 행 수        : 19
+  size 있는 행 (전체)         : 20
+  c.cbm 채워진 행 수          : 11
+  c.cbm ≈ 계산값 인 행 수     : 6   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+40FT+20FT
+  visual rows 총합            : 24
+  bulkItems 총합              : 6
+  unplaced 총 수량            : 0
+  visual 로 간 cargoId 5개    : hm-2-15, hm-2-12, hm-2-17, hm-2-19, hm-2-24
+  CT bulk 로 간 cargoId 5개   : hm-2-1, hm-2-3, hm-2-5, hm-2-11, hm-2-14
+  size 있는데 CT 로 간 행 수  : 0   ← 룰 위반 후보
+  size 있는데 미배치 행 수    : 0
+
+[hm-3] 3ST HM
+  totalRows                   : 19
+  allHaveCbm                  : true   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 15
+  unitSizes 있는 행 수        : 1
+  size 있는 행 (전체)         : 15
+  c.cbm 채워진 행 수          : 19
+  c.cbm ≈ 계산값 인 행 수     : 3   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+20FT
+  visual rows 총합            : 0
+  bulkItems 총합              : 19
+  unplaced 총 수량            : 0
+  visual 로 간 cargoId 5개    : (없음)
+  CT bulk 로 간 cargoId 5개   : hm-3-1, hm-3-2, hm-3-3, hm-3-4, hm-3-5
+  size 있는데 CT 로 간 행 수  : 15   ← 룰 위반 후보
+     예시 5: hm-3-1(W133L113H43), hm-3-2(W117L74H82), hm-3-3(W72L72H97), hm-3-4(W110L110H100), hm-3-5(W135L115H55)
+  size 있는데 미배치 행 수    : 0
+
+[hm-4] 4ST HM
+  totalRows                   : 41
+  allHaveCbm                  : false   ← 현재 classify 룰 1 조건
+  allHaveUserEnteredCbm       : false   ← cbm 값이 박스 계산값과 다른 행만
+  allHaveCalculatedCbm        : false   ← cbm 값이 박스 계산값과 ≈ 같은 행만
+  anyHasSize                  : true
+  W/L/H 있는 행 수            : 22
+  unitSizes 있는 행 수        : 20
+  size 있는 행 (전체)         : 22
+  c.cbm 채워진 행 수          : 13
+  c.cbm ≈ 계산값 인 행 수     : 8   ← 자동 채움 의심 행
+  -- pack 결과 --
+  containers                  : 40FT+40FT+20FT
+  visual rows 총합            : 18
+  bulkItems 총합              : 19
+  unplaced 총 수량            : 0
+  visual 로 간 cargoId 5개    : hm-4-38, hm-4-1, hm-4-2, hm-4-15, hm-4-12
+  CT bulk 로 간 cargoId 5개   : hm-4-3, hm-4-8, hm-4-9, hm-4-10, hm-4-13
+  size 있는데 CT 로 간 행 수  : 0   ← 룰 위반 후보
+  size 있는데 미배치 행 수    : 0
+
+=== cbmSource 구분 가능 여부 ===
+
+현재 데이터 모델: c.cbm 한 필드만 존재 (Excel 'CFS CBM' 열 + 사용자 직접 입력 + 자동 채움 결과 모두 같은 곳).
+→ 명시적 구분 X. 휴리스틱 (cbm ≈ W×L×H×Q 인지) 으로 추정만 가능.
+
+권장: cbmSource: 'user' | 'calculated' | 'cfs' 필드 도입 (UnitSize / CargoSpec 둘 다).
+- 'user'  — 사용자가 모달에서 직접 타이핑한 값
+- 'cfs'   — Excel CFS CBM 열에서 읽은 값 (사용자 입력 기원)
+- 'calculated' — UI 가 W×L×H×Q 로 자동 계산해서 채운 값 (classify allHaveCbm 판단에서 제외해야 함)

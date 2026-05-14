@@ -1,0 +1,33 @@
+# 3차 — singleStrategy + time budget 실험
+date: 2026-05-13T09:32:04.431Z
+timeout: 60s/실험, softCap=1.05
+
+## 실험: pack() 단일 전략 + 인라인 candidateUnion (multi-strategy matrix 우회)
+
+| sample | exp | 컨 셋 | unpl unit | unpl cargo | cargoIds | cargoSpl | bookSpl | audit | softCbm | hardCbm | pack(s) | timeout |
+|---|---|---|---:|---:|---|---:|---:|---|---:|---:|---:|:---:|
+| sg-1 | E9-pack-bookCluster | 40FT+20FT | 1 | 1 | sg-1-14×1 | 0 | 0 | P | 0 | 0 | 6.6 |  |
+| sg-1 | E10-pack-bigCargo | 40FT+20FT | 1 | 1 | sg-1-14×1 | 0 | 0 | P | 0 | 0 | 0.1 |  |
+| sg-1 | E11-cu+bookCluster | 40FT+20FT | 1 | 1 | sg-1-14×1 | 0 | 0 | P | 0 | 0 | 0.2 |  |
+| sg-1 | E12-cu+bigCargo | 40FT+20FT | 1 | 1 | sg-1-14×1 | 0 | 0 | P | 0 | 0 | 0.1 |  |
+
+| sg-4 | E9-pack-bookCluster | 40FT+40FT+40FT | 1 | 1 | sg-4-4×1 | 0 | 0 | P | 0 | 0 | 85.4 | TIME |
+| sg-4 | E10-pack-bigCargo | 40FT+40FT+40FT | 1 | 1 | sg-4-4×1 | 0 | 0 | P | 0 | 0 | 34.6 |  |
+| sg-4 | E11-cu+bookCluster | 40FT+40FT+40FT | 1 | 1 | sg-4-4×1 | 0 | 0 | P | 0 | 0 | 5.6 |  |
+| sg-4 | E12-cu+bigCargo | 40FT+40FT+40FT | 1 | 1 | sg-4-4×1 | 0 | 0 | P | 0 | 0 | 5.0 |  |
+
+| sg-5 | E9-pack-bookCluster | 40FT+40FT | 3 | 2 | sg-5-17×1,sg-5-35×2 | 0 | 0 | P | 0 | 0 | 27.9 |  |
+| sg-5 | E10-pack-bigCargo | 40FT+40FT | 6 | 6 | sg-5-17×1,sg-5-22×1,sg-5-25×1,sg-5-28×1,sg-5-30×1,sg-5-32×1 | 0 | 0 | P | 0 | 0 | 55.7 |  |
+| sg-5 | E11-cu+bookCluster | 40FT+40FT | 3 | 2 | sg-5-17×1,sg-5-35×2 | 0 | 0 | P | 0 | 0 | 5.6 |  |
+| sg-5 | E12-cu+bigCargo | 40FT+40FT | 6 | 6 | sg-5-17×1,sg-5-22×1,sg-5-25×1,sg-5-28×1,sg-5-30×1,sg-5-32×1 | 0 | 0 | P | 0 | 0 | 28.1 |  |
+
+## sg-4 E8 stall 원인 분리
+- E9 pack-bookCluster (단일 전략): sg-4 = ${밑 결과 확인}
+- E11 cu+bookCluster (단일 전략 + candidate sets): sg-4 = ${밑 결과 확인}
+- 만약 E11 도 stall 가능성 시: candidateUnion 자체 폭증
+- E11 빠르고 packBest 8 strategy 우회만 stall 회피 시: multi-strategy matrix 폭증
+- E9 자체 stall 시: cargo brute-force 폭증 (단일 pack 안)
+
+## sg-5 잔여 cargo 개수 정확 보고
+- E9 결과의 unplCargoIds 컬럼이 cargoId × unit 수 형식 (예: sg-5-35×2 → cargoId 1개, unit 2개)
+- 이전 보고에서 "sg-5 잔여 3 cargo" 는 사실 "3 unit" 의 잘못된 표현 가능성 — 본 실험 결과로 확정

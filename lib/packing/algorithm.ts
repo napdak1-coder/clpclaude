@@ -416,6 +416,21 @@ function makeContainer(index: number, spec: ContainerSpec): ContainerState {
   };
 }
 
+/**
+ * 컨테이너 CBM 운영 한도 — soft overflow 허용 비율.
+ *
+ * 운영 한도(40FT 60 / 20FT 28) 는 보수적이라 실무에서 5% 정도는 통상 허용.
+ * 부킹 묶음 보존을 위해 약간의 overflow 허용 — `allocateBulkGroup` 의 sticky 룰과 일관.
+ *
+ * 사용처:
+ *   - `allocateBulkGroup` — sticky/anchor 통째 fit 시 softCap 이내 OK
+ *   - `isValid6` (candidateUnion 단락 평가) — softCap 이내는 valid-with-warning
+ *   - `compareLex` (candidateUnion lex fallback) — hardCbmOverflow 카운트만 사용 (soft 는 카운트 X)
+ *
+ * **운영 의미**: maxCbm 초과 ~ softCap 이내 = 운영 허용 warning, softCap 초과 = hard invalid.
+ */
+export const CONTAINER_SOFT_OVERFLOW_RATIO = 1.05;
+
 /** 컨테이너의 남은 CBM 여유 = maxCbm - (visual + ct + completed) */
 function remainingCbm(c: ContainerState): number {
   return (
@@ -441,9 +456,9 @@ function allocateBulkGroup(
   /** visual 배치 단계에서 이미 anchor 가 설정된 booking → container 맵 */
   initialBookingAnchor?: Map<string, ContainerState>,
 ): { unplacedItems: { cargo: CargoSpec; cbm: number }[] } {
-  // 컨테이너 cap 의 soft overflow 비율. 운영 한도(60/28) 는 보수적이어서
-  // 실무에서 5% 정도는 통상 허용. 부킹 묶음 보존을 위해 약간의 overflow 허용.
-  const SOFT_OVERFLOW = 1.05;
+  // 컨테이너 cap 의 soft overflow 비율 — 공용 상수 사용 (CONTAINER_SOFT_OVERFLOW_RATIO).
+  // 운영 한도(60/28) 는 보수적이어서 실무에서 5% 정도는 통상 허용. 부킹 묶음 보존을 위해 약간의 overflow 허용.
+  const SOFT_OVERFLOW = CONTAINER_SOFT_OVERFLOW_RATIO;
   const unplacedItems: { cargo: CargoSpec; cbm: number }[] = [];
 
   // booking-aware: 같은 booking_no 의 cargo 가 어느 컨에 안착했는지 추적
@@ -620,6 +635,11 @@ export interface PackOptions {
   /**
    * unit 정렬 전략 — 기본 "ldf" (부피 큰 순).
    * 다중 시뮬레이션(packBest) 에서 여러 전략을 비교할 때 사용.
+   *
+   * - `biggest-cargo-first` (2026-05-13 E1): cargo 단위로 묶어서 큰 cargo 가 먼저 자리 잡도록.
+   *   우선순위 lex: ① cargo 총 CBM ② unit 수 ③ footprint(W×L) ④ 총중량 ⑤ 긴 변.
+   *   같은 cargo 안 unit 끼리는 ldf (부피 큰 순) 보조 정렬.
+   *   점수 합산 X — 모두 lex.
    */
   sortStrategy?:
     | "ldf"
@@ -629,7 +649,9 @@ export interface PackOptions {
     | "widest"
     | "shortest"
     | "shortest-height"
-    | "heaviest";
+    | "heaviest"
+    | "biggest-cargo-first"
+    | "booking-cluster-first";
   /**
    * 컨테이너 후보 순서 — 자유 분배 시 어떤 컨테이너를 먼저 시도할지.
    *  - "biggest-first" (기본): 입력 순서 그대로 (보통 40FT > 20FT)
@@ -700,6 +722,26 @@ export interface PackOptions {
    * 라서 옵션 켜져도 그대로 룰 1 발동 (CT 벌크).
    */
   strictVisualClassification?: boolean;
+  /**
+   * 진단/실험 전용 residual local repair.
+   *
+   * production 기본 경로에서는 비활성이다. 남은 cargoId를 넣기 위해 같은 컨테이너 안의
+   * 주변 cargoId 몇 개만 통째로 제거한 뒤 residual cargo를 먼저 넣고 제거 cargo를
+   * 다시 넣어 본다. 실패하면 snapshot rollback.
+   */
+  residualMakeRoom?: {
+    enabled?: boolean;
+    maxRemoveCargoIds?: number;
+    maxRemoveUnits?: number;
+    maxTargetsPerCargo?: number;
+    timeBudgetMs?: number;
+    /**
+     * qty≥2 인 atomic cargo 가 두 박스를 같이 들어갈 자리 (묶음 footprint) target 도
+     * 후보로 추가. 같은 cargo 안 모든 unit 의 회전 후 크기가 동일할 때만.
+     * 기본 false. opt-in. (sg-5-35 같이 큰 발바닥 묶음 케이스용)
+     */
+    bundleTargets?: boolean;
+  };
 }
 
 /** cm 단위 미세 좌표 비교 — extreme-point 내부 EPS 와 같은 수준이면 충분 */
@@ -1146,6 +1188,585 @@ function repositionUnplaced(
   return stillUnplaced;
 }
 
+type Point3D = { x: number; y: number; z: number };
+
+type ResidualMakeRoomOptions = NonNullable<PackOptions["residualMakeRoom"]>;
+
+type ResidualTarget = Point3D & {
+  faceIdx: number;
+  size: { width: number; length: number; height: number };
+  conflictCargoIds: string[];
+  /**
+   * 묶음 target (bundleTargets opt-in). 정의되면 N unit 묶음 자리.
+   * - axis: 'x' (폭 방향 옆으로), 'y' (길이 방향 직렬), 'z' (높이 적층)
+   * - count: 묶음 unit 수
+   * - unitSize: 개별 unit 회전 후 크기 (size 는 묶음 전체 크기)
+   */
+  bundle?: {
+    axis: "x" | "y" | "z";
+    count: number;
+    unitSize: { width: number; length: number; height: number };
+  };
+};
+
+function unitVolumeCbm(u: UnitItem): number {
+  return (u.width * u.length * u.height) / 1_000_000;
+}
+
+function unitVolumeCm3(u: UnitItem): number {
+  return u.width * u.length * u.height;
+}
+
+function cargoUnitsVolumeCbm(units: UnitItem[]): number {
+  return units.reduce((sum, u) => sum + unitVolumeCbm(u), 0);
+}
+
+function cargoUnitsWeight(units: UnitItem[]): number {
+  return units.reduce((sum, u) => sum + u.weight, 0);
+}
+
+function restorePackState(state: ContainerPackState, snap: ContainerPackState): void {
+  state.placements = snap.placements;
+  state.candidates = snap.candidates;
+  state.totalWeight = snap.totalWeight;
+  state.visualCbm = snap.visualCbm;
+}
+
+function addCandidateOnce(list: Point3D[], p: Point3D, spec: ContainerSpec): void {
+  if (
+    p.x < -STACK_EPS ||
+    p.y < -STACK_EPS ||
+    p.z < -STACK_EPS ||
+    p.x > spec.innerWidth + STACK_EPS ||
+    p.y > spec.innerLength + STACK_EPS ||
+    p.z > spec.innerHeight + STACK_EPS
+  ) {
+    return;
+  }
+  const x = Math.max(0, p.x);
+  const y = Math.max(0, p.y);
+  const z = Math.max(0, p.z);
+  const dup = list.some(
+    (c) =>
+      Math.abs(c.x - x) < STACK_EPS &&
+      Math.abs(c.y - y) < STACK_EPS &&
+      Math.abs(c.z - z) < STACK_EPS,
+  );
+  if (!dup) list.push({ x, y, z });
+}
+
+function rebuildPackStateCandidates(
+  state: ContainerPackState,
+  spec: ContainerSpec,
+  extraCandidates: Point3D[] = [],
+): void {
+  state.totalWeight = 0;
+  state.visualCbm = 0;
+  const candidates: Point3D[] = [];
+  addCandidateOnce(candidates, { x: 0, y: 0, z: 0 }, spec);
+  for (const p of state.placements) {
+    state.totalWeight += p.weight;
+    state.visualCbm += (p.size.width * p.size.length * p.size.height) / 1_000_000;
+    addCandidateOnce(
+      candidates,
+      { x: p.position.x + p.size.width, y: p.position.y, z: p.position.z },
+      spec,
+    );
+    addCandidateOnce(
+      candidates,
+      { x: p.position.x, y: p.position.y + p.size.length, z: p.position.z },
+      spec,
+    );
+    addCandidateOnce(
+      candidates,
+      { x: p.position.x, y: p.position.y, z: p.position.z + p.size.height },
+      spec,
+    );
+  }
+  for (const p of extraCandidates) addCandidateOnce(candidates, p, spec);
+  candidates.sort((a, b) => (a.z - b.z) || (a.y - b.y) || (a.x - b.x));
+  state.candidates = candidates;
+}
+
+function placementIntersectsBox(
+  p: ContainerPackState["placements"][number],
+  box: Point3D & { width: number; length: number; height: number },
+): boolean {
+  return !(
+    p.position.x + p.size.width <= box.x + STACK_EPS ||
+    box.x + box.width <= p.position.x + STACK_EPS ||
+    p.position.y + p.size.length <= box.y + STACK_EPS ||
+    box.y + box.length <= p.position.y + STACK_EPS ||
+    p.position.z + p.size.height <= box.z + STACK_EPS ||
+    box.z + box.height <= p.position.z + STACK_EPS
+  );
+}
+
+function generateResidualTargets(
+  cont: ContainerState,
+  units: UnitItem[],
+  maxTargets: number,
+  bundleTargets: boolean = false,
+): ResidualTarget[] {
+  const primary = [...units].sort((a, b) => unitVolumeCm3(b) - unitVolumeCm3(a))[0];
+  if (!primary) return [];
+  const targets: ResidualTarget[] = [];
+  const seen = new Set<string>();
+
+  const addTarget = (
+    faceIdx: number,
+    size: { width: number; length: number; height: number },
+    x: number,
+    y: number,
+    z: number,
+    bundle?: ResidualTarget["bundle"],
+  ) => {
+    if (
+      x < -STACK_EPS ||
+      y < -STACK_EPS ||
+      z < -STACK_EPS ||
+      x + size.width > cont.spec.innerWidth + STACK_EPS ||
+      y + size.length > cont.spec.innerLength + STACK_EPS ||
+      z + size.height > cont.spec.innerHeight + STACK_EPS
+    ) {
+      return;
+    }
+    const box = { x: Math.max(0, x), y: Math.max(0, y), z: Math.max(0, z), ...size };
+    const conflictCargoIds = [
+      ...new Set(
+        cont.packState.placements
+          .filter((p) => placementIntersectsBox(p, box))
+          .map((p) => p.cargoId),
+      ),
+    ].sort();
+    const key = [
+      faceIdx,
+      Math.round(box.x * 100),
+      Math.round(box.y * 100),
+      Math.round(box.z * 100),
+      conflictCargoIds.join(","),
+      bundle ? `${bundle.axis}x${bundle.count}` : "single",
+    ].join(":");
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({ x: box.x, y: box.y, z: box.z, faceIdx, size, conflictCargoIds, bundle });
+  };
+
+  for (const faceIdx of allowedFaces(primary)) {
+    const size = effectiveSizeFace(primary, faceIdx);
+    if (
+      size.width > cont.spec.innerWidth + STACK_EPS ||
+      size.length > cont.spec.innerLength + STACK_EPS ||
+      size.height > cont.spec.innerHeight + STACK_EPS
+    ) {
+      continue;
+    }
+    addTarget(faceIdx, size, 0, 0, 0);
+    addTarget(faceIdx, size, cont.spec.innerWidth - size.width, 0, 0);
+    addTarget(faceIdx, size, 0, cont.spec.innerLength - size.length, 0);
+    addTarget(faceIdx, size, cont.spec.innerWidth - size.width, cont.spec.innerLength - size.length, 0);
+
+    for (const p of cont.packState.placements) {
+      addTarget(faceIdx, size, p.position.x + p.size.width, p.position.y, p.position.z);
+      addTarget(faceIdx, size, p.position.x, p.position.y + p.size.length, p.position.z);
+      addTarget(faceIdx, size, p.position.x, p.position.y, p.position.z + p.size.height);
+      addTarget(faceIdx, size, p.position.x + p.size.width, p.position.y + p.size.length, p.position.z);
+    }
+  }
+
+  // [bundleTargets opt-in] qty≥2 cargo 의 묶음 자리 target 추가.
+  // 모든 unit 의 raw 크기 동일할 때만 활성 (atomic 적층 안전성).
+  if (bundleTargets && units.length >= 2) {
+    const u0 = units[0];
+    const allSame = units.every(
+      (u) =>
+        Math.abs(u.width - u0.width) < STACK_EPS &&
+        Math.abs(u.length - u0.length) < STACK_EPS &&
+        Math.abs(u.height - u0.height) < STACK_EPS,
+    );
+    if (allSame) {
+      const n = units.length;
+      for (const faceIdx of allowedFaces(primary)) {
+        const eff = effectiveSizeFace(primary, faceIdx);
+        // axis = 'x' (폭 방향 옆으로): super box = (W×n, L, H)
+        const sxW = eff.width * n;
+        if (sxW <= cont.spec.innerWidth + STACK_EPS && eff.length <= cont.spec.innerLength + STACK_EPS && eff.height <= cont.spec.innerHeight + STACK_EPS) {
+          const bundleSize = { width: sxW, length: eff.length, height: eff.height };
+          const bundleInfo: ResidualTarget["bundle"] = { axis: "x", count: n, unitSize: eff };
+          addTarget(faceIdx, bundleSize, 0, 0, 0, bundleInfo);
+          addTarget(faceIdx, bundleSize, cont.spec.innerWidth - sxW, 0, 0, bundleInfo);
+          addTarget(faceIdx, bundleSize, 0, cont.spec.innerLength - eff.length, 0, bundleInfo);
+          addTarget(faceIdx, bundleSize, cont.spec.innerWidth - sxW, cont.spec.innerLength - eff.length, 0, bundleInfo);
+          for (const p of cont.packState.placements) {
+            addTarget(faceIdx, bundleSize, p.position.x + p.size.width, p.position.y, p.position.z, bundleInfo);
+            addTarget(faceIdx, bundleSize, p.position.x, p.position.y + p.size.length, p.position.z, bundleInfo);
+          }
+        }
+        // axis = 'y' (길이 방향 직렬): super box = (W, L×n, H)
+        const syL = eff.length * n;
+        if (eff.width <= cont.spec.innerWidth + STACK_EPS && syL <= cont.spec.innerLength + STACK_EPS && eff.height <= cont.spec.innerHeight + STACK_EPS) {
+          const bundleSize = { width: eff.width, length: syL, height: eff.height };
+          const bundleInfo: ResidualTarget["bundle"] = { axis: "y", count: n, unitSize: eff };
+          addTarget(faceIdx, bundleSize, 0, 0, 0, bundleInfo);
+          addTarget(faceIdx, bundleSize, cont.spec.innerWidth - eff.width, 0, 0, bundleInfo);
+          addTarget(faceIdx, bundleSize, 0, cont.spec.innerLength - syL, 0, bundleInfo);
+          addTarget(faceIdx, bundleSize, cont.spec.innerWidth - eff.width, cont.spec.innerLength - syL, 0, bundleInfo);
+          for (const p of cont.packState.placements) {
+            addTarget(faceIdx, bundleSize, p.position.x + p.size.width, p.position.y, p.position.z, bundleInfo);
+            addTarget(faceIdx, bundleSize, p.position.x, p.position.y + p.size.length, p.position.z, bundleInfo);
+          }
+        }
+        // axis = 'z' (높이 적층): super box = (W, L, H×n) — noStacking 아닐 때만
+        const noStack = units.some((u) => u.remarks?.noStacking);
+        const szH = eff.height * n;
+        if (!noStack && eff.width <= cont.spec.innerWidth + STACK_EPS && eff.length <= cont.spec.innerLength + STACK_EPS && szH <= cont.spec.innerHeight + STACK_EPS) {
+          const bundleSize = { width: eff.width, length: eff.length, height: szH };
+          const bundleInfo: ResidualTarget["bundle"] = { axis: "z", count: n, unitSize: eff };
+          addTarget(faceIdx, bundleSize, 0, 0, 0, bundleInfo);
+          addTarget(faceIdx, bundleSize, cont.spec.innerWidth - eff.width, 0, 0, bundleInfo);
+          addTarget(faceIdx, bundleSize, 0, cont.spec.innerLength - eff.length, 0, bundleInfo);
+          for (const p of cont.packState.placements) {
+            addTarget(faceIdx, bundleSize, p.position.x + p.size.width, p.position.y, p.position.z, bundleInfo);
+            addTarget(faceIdx, bundleSize, p.position.x, p.position.y + p.size.length, p.position.z, bundleInfo);
+          }
+        }
+      }
+    }
+  }
+
+  targets.sort(
+    (a, b) =>
+      (a.conflictCargoIds.length - b.conflictCargoIds.length) ||
+      (a.z - b.z) ||
+      (a.y - b.y) ||
+      (a.x - b.x) ||
+      (a.faceIdx - b.faceIdx),
+  );
+  return targets.slice(0, maxTargets);
+}
+
+function gapTupleToTarget(
+  p: ContainerPackState["placements"][number],
+  target: ResidualTarget,
+): [number, number, number, number, string] {
+  const dx = Math.max(
+    0,
+    Math.max(p.position.x - (target.x + target.size.width), target.x - (p.position.x + p.size.width)),
+  );
+  const dy = Math.max(
+    0,
+    Math.max(p.position.y - (target.y + target.size.length), target.y - (p.position.y + p.size.length)),
+  );
+  const dz = Math.max(
+    0,
+    Math.max(p.position.z - (target.z + target.size.height), target.z - (p.position.z + p.size.height)),
+  );
+  return [Math.max(dx, dy, dz), dx, dy, dz, p.cargoId];
+}
+
+function conflictVariantsForTarget(
+  cont: ContainerState,
+  target: ResidualTarget,
+  unitsByCargoId: Map<string, UnitItem[]>,
+  maxRemoveCargoIds: number,
+  maxRemoveUnits: number,
+): string[][] {
+  const variants: string[][] = [];
+  const seen = new Set<string>();
+  const push = (ids: string[]) => {
+    const sorted = [...new Set(ids)].sort();
+    if (sorted.length > maxRemoveCargoIds) return;
+    const unitCount = sorted.reduce((sum, cargoId) => sum + (unitsByCargoId.get(cargoId)?.length ?? 0), 0);
+    if (unitCount > maxRemoveUnits) return;
+    const key = sorted.join(",");
+    if (seen.has(key)) return;
+    seen.add(key);
+    variants.push(sorted);
+  };
+
+  const base = [...target.conflictCargoIds].sort();
+  push(base);
+
+  const nearest = cont.packState.placements
+    .filter((p) => !base.includes(p.cargoId))
+    .map((p) => ({ cargoId: p.cargoId, tuple: gapTupleToTarget(p, target) }))
+    .sort((a, b) => {
+      for (let i = 0; i < 4; i++) {
+        if (a.tuple[i] !== b.tuple[i]) return a.tuple[i] - b.tuple[i];
+      }
+      return a.cargoId.localeCompare(b.cargoId);
+    });
+  const nearestCargoIds: string[] = [];
+  for (const n of nearest) {
+    if (!nearestCargoIds.includes(n.cargoId)) nearestCargoIds.push(n.cargoId);
+    if (nearestCargoIds.length >= 6) break;
+  }
+
+  for (let i = 0; i < nearestCargoIds.length; i++) {
+    push([...base, nearestCargoIds[i]]);
+    for (let j = i + 1; j < nearestCargoIds.length; j++) {
+      push([...base, nearestCargoIds[i], nearestCargoIds[j]]);
+      if (base.length === 0) {
+        for (let k = j + 1; k < nearestCargoIds.length; k++) {
+          push([nearestCargoIds[i], nearestCargoIds[j], nearestCargoIds[k]]);
+        }
+      }
+    }
+  }
+
+  return variants.slice(0, 8);
+}
+
+function placeCargoUnitsInContainer(
+  units: UnitItem[],
+  cont: ContainerState,
+  firstTarget?: ResidualTarget,
+): boolean {
+  const snap = structuredClone(cont.packState);
+  let remaining = [...units].sort((a, b) => unitVolumeCm3(b) - unitVolumeCm3(a));
+
+  if (firstTarget && remaining.length > 0) {
+    if (firstTarget.bundle) {
+      // [bundleTargets] 묶음 target — N unit 모두 axis 방향 오프셋에 강제 배치
+      const { axis, count, unitSize } = firstTarget.bundle;
+      if (remaining.length < count) {
+        restorePackState(cont.packState, snap);
+        return false;
+      }
+      for (let i = 0; i < count; i++) {
+        const u = remaining[i];
+        const offsetX = axis === "x" ? firstTarget.x + unitSize.width * i : firstTarget.x;
+        const offsetY = axis === "y" ? firstTarget.y + unitSize.length * i : firstTarget.y;
+        const offsetZ = axis === "z" ? firstTarget.z + unitSize.height * i : firstTarget.z;
+        const placed = tryPlaceUnit(u, cont.packState, cont.spec, {
+          forceFaceIdx: firstTarget.faceIdx,
+          scoreFn: (cand) =>
+            Math.abs(cand.x - offsetX) < STACK_EPS &&
+            Math.abs(cand.y - offsetY) < STACK_EPS &&
+            Math.abs(cand.z - offsetZ) < STACK_EPS
+              ? 0
+              : Number.POSITIVE_INFINITY,
+        });
+        if (!placed) {
+          restorePackState(cont.packState, snap);
+          return false;
+        }
+      }
+      remaining = remaining.slice(count);
+    } else {
+      const first = remaining[0];
+      const targetPlaced = tryPlaceUnit(first, cont.packState, cont.spec, {
+        forceFaceIdx: firstTarget.faceIdx,
+        scoreFn: (cand) =>
+          Math.abs(cand.x - firstTarget.x) < STACK_EPS &&
+          Math.abs(cand.y - firstTarget.y) < STACK_EPS &&
+          Math.abs(cand.z - firstTarget.z) < STACK_EPS
+            ? 0
+            : Number.POSITIVE_INFINITY,
+      });
+      if (!targetPlaced) {
+        restorePackState(cont.packState, snap);
+        return false;
+      }
+      remaining = remaining.slice(1);
+    }
+  }
+
+  if (remaining.length >= 2 && !remaining[0].remarks.noStacking) {
+    while (remaining.length >= 2) {
+      const result = tryBundleStack(remaining, [cont]);
+      if (result.placed.length === 0) break;
+      remaining = result.remaining;
+    }
+  }
+
+  for (const u of remaining) {
+    const ok =
+      tryPlaceUnit(u, cont.packState, cont.spec, { enableWallProjection: true }) ||
+      tryPlaceUnitBruteForce(u, cont.packState, cont.spec);
+    if (!ok) {
+      restorePackState(cont.packState, snap);
+      return false;
+    }
+  }
+  return true;
+}
+
+function hardContainerViolationCount(containers: ContainerState[]): number {
+  let count = 0;
+  for (const c of containers) {
+    const actualCbm = c.packState.visualCbm + c.ctCbm + c.completedCbm;
+    if (actualCbm > c.spec.maxCbm * CONTAINER_SOFT_OVERFLOW_RATIO + 0.001) count++;
+    if (c.packState.totalWeight > c.spec.maxWeightKg + 0.001) count++;
+  }
+  return count;
+}
+
+function stateSplitCounts(containers: ContainerState[]): {
+  cargoSplit: number;
+  bookingSplit: number;
+} {
+  const cargoContainers = new Map<string, Set<number>>();
+  const bookingContainers = new Map<string, Set<number>>();
+
+  const add = (cargoId: string | undefined, bookingNo: string | undefined, idx: number) => {
+    if (cargoId) {
+      const set = cargoContainers.get(cargoId) ?? new Set<number>();
+      set.add(idx);
+      cargoContainers.set(cargoId, set);
+    }
+    if (bookingNo) {
+      const set = bookingContainers.get(bookingNo) ?? new Set<number>();
+      set.add(idx);
+      bookingContainers.set(bookingNo, set);
+    }
+  };
+
+  for (const c of containers) {
+    for (const p of c.packState.placements) add(p.cargoId, p.bookingNo, c.index);
+    for (const b of c.bulkItems as Array<BulkItem & { bookingNo?: string }>) {
+      add(b.cargoId, b.bookingNo, c.index);
+    }
+  }
+
+  return {
+    cargoSplit: [...cargoContainers.values()].filter((set) => set.size > 1).length,
+    bookingSplit: [...bookingContainers.values()].filter((set) => set.size > 1).length,
+  };
+}
+
+function strictAuditPassForStates(containers: ContainerState[]): boolean {
+  const result = {
+    containers: containers.map(finalizeContainer),
+    unplaced: [],
+    summary: {},
+  } as CLPResult;
+  const audit = strictStackAudit(result);
+  return audit.pass && audit.violations.length === 0;
+}
+
+function tryResidualMakeRoomForCargo(
+  containers: ContainerState[],
+  units: UnitItem[],
+  unitsByCargoId: Map<string, UnitItem[]>,
+  eligibleContainers: ContainerState[],
+  options: Required<
+    Pick<
+      ResidualMakeRoomOptions,
+      "maxRemoveCargoIds" | "maxRemoveUnits" | "maxTargetsPerCargo" | "timeBudgetMs"
+    >
+  > & { bundleTargets?: boolean },
+  startedAt: number,
+  onPlaced: (u: UnitItem, c: ContainerState) => void,
+): boolean {
+  const residualCbm = cargoUnitsVolumeCbm(units);
+  const residualWeight = cargoUnitsWeight(units);
+
+  for (const cont of eligibleContainers) {
+    if (Date.now() - startedAt > options.timeBudgetMs) return false;
+    const finalCbm = cont.packState.visualCbm + cont.ctCbm + cont.completedCbm + residualCbm;
+    const finalWeight = cont.packState.totalWeight + residualWeight;
+    if (finalCbm > cont.spec.maxCbm * CONTAINER_SOFT_OVERFLOW_RATIO + 0.001) continue;
+    if (finalWeight > cont.spec.maxWeightKg + 0.001) continue;
+
+    const targets = generateResidualTargets(cont, units, options.maxTargetsPerCargo, options.bundleTargets ?? false);
+    for (const target of targets) {
+      if (Date.now() - startedAt > options.timeBudgetMs) return false;
+      const conflictVariants = conflictVariantsForTarget(
+        cont,
+        target,
+        unitsByCargoId,
+        options.maxRemoveCargoIds,
+        options.maxRemoveUnits,
+      );
+
+      for (const conflictCargoIds of conflictVariants) {
+        if (Date.now() - startedAt > options.timeBudgetMs) return false;
+        const snap = structuredClone(cont.packState);
+        const conflictSet = new Set(conflictCargoIds);
+        cont.packState.placements = cont.packState.placements.filter((p) => !conflictSet.has(p.cargoId));
+        rebuildPackStateCandidates(cont.packState, cont.spec, [{ x: target.x, y: target.y, z: target.z }]);
+
+        let ok = placeCargoUnitsInContainer(units, cont, target);
+        if (ok) {
+          for (const cargoId of conflictCargoIds) {
+            const evictedUnits = unitsByCargoId.get(cargoId) ?? [];
+            if (evictedUnits.length === 0 || !placeCargoUnitsInContainer(evictedUnits, cont)) {
+              ok = false;
+              break;
+            }
+          }
+        }
+
+        if (ok) {
+          const splits = stateSplitCounts(containers);
+          ok =
+            splits.cargoSplit === 0 &&
+            splits.bookingSplit === 0 &&
+            hardContainerViolationCount(containers) === 0 &&
+            strictAuditPassForStates(containers);
+        }
+
+        if (ok) {
+          for (const u of units) onPlaced(u, cont);
+          return true;
+        }
+
+        restorePackState(cont.packState, snap);
+      }
+    }
+  }
+
+  return false;
+}
+
+function residualMakeRoomRepack(
+  containers: ContainerState[],
+  unplaced: UnitItem[],
+  unitsByCargoId: Map<string, UnitItem[]>,
+  options: ResidualMakeRoomOptions,
+  candidatesForUnit: (u: UnitItem) => ContainerState[],
+  onPlaced: (u: UnitItem, c: ContainerState) => void,
+): UnitItem[] {
+  if (!options.enabled || unplaced.length === 0) return unplaced;
+  const opts = {
+    maxRemoveCargoIds: options.maxRemoveCargoIds ?? 3,
+    maxRemoveUnits: options.maxRemoveUnits ?? 12,
+    maxTargetsPerCargo: options.maxTargetsPerCargo ?? 50,
+    timeBudgetMs: options.timeBudgetMs ?? 60_000,
+    bundleTargets: options.bundleTargets ?? false,
+  };
+  const startedAt = Date.now();
+  const byCargo = new Map<string, UnitItem[]>();
+  for (const u of unplaced) {
+    const list = byCargo.get(u.cargoId) ?? [];
+    list.push(u);
+    byCargo.set(u.cargoId, list);
+  }
+  const orderedGroups = [...byCargo.values()];
+
+  const stillUnplaced: UnitItem[] = [];
+  for (const units of orderedGroups) {
+    if (Date.now() - startedAt > opts.timeBudgetMs) {
+      stillUnplaced.push(...units);
+      continue;
+    }
+    units.sort((a, b) => a.unitId.localeCompare(b.unitId));
+    const eligible = candidatesForUnit(units[0]);
+    const placed = tryResidualMakeRoomForCargo(
+      containers,
+      units,
+      unitsByCargoId,
+      eligible,
+      opts,
+      startedAt,
+      onPlaced,
+    );
+    if (!placed) stillUnplaced.push(...units);
+  }
+  return stillUnplaced;
+}
+
 /**
  * 메인 진입점.
  * 점수 없이 결정적 룰로 한 번에 패킹.
@@ -1318,6 +1939,127 @@ export function pack(
   const sortBig = (units: UnitItem[]): UnitItem[] => {
     const strat = options?.sortStrategy ?? "ldf";
     if (strat === "input") return [...units];
+    // [2026-05-13 E1] biggest-cargo-first — cargo 단위로 묶어서 큰 cargo 가 먼저 자리 잡도록.
+    // 우선순위 lex (점수 합산 X): ① cargo 총 CBM ② unit 수 ③ footprint ④ 총중량 ⑤ 긴 변.
+    // 같은 cargo 안 unit 끼리는 ldf 보조 정렬.
+    if (strat === "biggest-cargo-first") {
+      type CargoMetrics = {
+        cargoId: string;
+        totalCbm: number;
+        unitCount: number;
+        footprintMax: number;
+        totalWeight: number;
+        longestSide: number;
+        units: UnitItem[];
+      };
+      const byCargo = new Map<string, CargoMetrics>();
+      for (const u of units) {
+        let m = byCargo.get(u.cargoId);
+        if (!m) {
+          m = {
+            cargoId: u.cargoId,
+            totalCbm: 0,
+            unitCount: 0,
+            footprintMax: 0,
+            totalWeight: 0,
+            longestSide: 0,
+            units: [],
+          };
+          byCargo.set(u.cargoId, m);
+        }
+        const vol = (u.width * u.length * u.height) / 1_000_000;
+        m.totalCbm += vol;
+        m.unitCount += 1;
+        m.totalWeight += u.weight;
+        const fp = u.width * u.length;
+        if (fp > m.footprintMax) m.footprintMax = fp;
+        const ls = Math.max(u.width, u.length, u.height);
+        if (ls > m.longestSide) m.longestSide = ls;
+        m.units.push(u);
+      }
+      const sorted = [...byCargo.values()].sort((a, b) => {
+        if (b.totalCbm !== a.totalCbm) return b.totalCbm - a.totalCbm;
+        if (b.unitCount !== a.unitCount) return b.unitCount - a.unitCount;
+        if (b.footprintMax !== a.footprintMax) return b.footprintMax - a.footprintMax;
+        if (b.totalWeight !== a.totalWeight) return b.totalWeight - a.totalWeight;
+        return b.longestSide - a.longestSide;
+      });
+      const ldfUnitCompare = (a: UnitItem, b: UnitItem): number => {
+        const va = a.width * a.length * a.height;
+        const vb = b.width * b.length * b.height;
+        if (vb !== va) return vb - va;
+        const longA = Math.max(a.width, a.length, a.height);
+        const longB = Math.max(b.width, b.length, b.height);
+        if (longB !== longA) return longB - longA;
+        return b.weight - a.weight;
+      };
+      const out: UnitItem[] = [];
+      for (const m of sorted) {
+        out.push(...m.units.slice().sort(ldfUnitCompare));
+      }
+      return out;
+    }
+    // [2026-05-13 E3] booking-cluster-first — 같은 bookingNo 묶음 먼저, 그 안에서 큰 cargo 먼저.
+    // 우선순위 lex: ① booking 총 CBM 큰 순 ② booking 안 unit 수 ③ booking 안 footprint max ④ 총중량 ⑤ 긴 변.
+    // 같은 booking 안 unit 끼리는 ldf (부피 큰 순).
+    if (strat === "booking-cluster-first") {
+      type BookingMetrics = {
+        bookingKey: string;
+        totalCbm: number;
+        unitCount: number;
+        footprintMax: number;
+        totalWeight: number;
+        longestSide: number;
+        units: UnitItem[];
+      };
+      const byBooking = new Map<string, BookingMetrics>();
+      for (const u of units) {
+        const key = u.bookingNo ?? `__no_booking_${u.cargoId}`;
+        let m = byBooking.get(key);
+        if (!m) {
+          m = {
+            bookingKey: key,
+            totalCbm: 0,
+            unitCount: 0,
+            footprintMax: 0,
+            totalWeight: 0,
+            longestSide: 0,
+            units: [],
+          };
+          byBooking.set(key, m);
+        }
+        const vol = (u.width * u.length * u.height) / 1_000_000;
+        m.totalCbm += vol;
+        m.unitCount += 1;
+        m.totalWeight += u.weight;
+        const fp = u.width * u.length;
+        if (fp > m.footprintMax) m.footprintMax = fp;
+        const ls = Math.max(u.width, u.length, u.height);
+        if (ls > m.longestSide) m.longestSide = ls;
+        m.units.push(u);
+      }
+      const sorted = [...byBooking.values()].sort((a, b) => {
+        if (b.totalCbm !== a.totalCbm) return b.totalCbm - a.totalCbm;
+        if (b.unitCount !== a.unitCount) return b.unitCount - a.unitCount;
+        if (b.footprintMax !== a.footprintMax) return b.footprintMax - a.footprintMax;
+        if (b.totalWeight !== a.totalWeight) return b.totalWeight - a.totalWeight;
+        return b.longestSide - a.longestSide;
+      });
+      const ldfCompare = (a: UnitItem, b: UnitItem): number => {
+        const va = a.width * a.length * a.height;
+        const vb = b.width * b.length * b.height;
+        if (vb !== va) return vb - va;
+        const longA = Math.max(a.width, a.length, a.height);
+        const longB = Math.max(b.width, b.length, b.height);
+        if (longB !== longA) return longB - longA;
+        return b.weight - a.weight;
+      };
+      const out: UnitItem[] = [];
+      for (const m of sorted) {
+        out.push(...m.units.slice().sort(ldfCompare));
+      }
+      return out;
+    }
     return [...units].sort((a, b) => {
       switch (strat) {
         case "longest-side": {
@@ -2352,6 +3094,28 @@ export function pack(
     for (const u of stage6StillUnplaced) unplaced.push(u);
   }
 
+  // 5.8) Residual make-room repack (diagnostic opt-in only).
+  // Local repair: remove a bounded conflict set inside one container, place the
+  // residual cargo first, then put removed cargoIds back. Failure rolls back.
+  if (unplaced.length > 0 && options?.residualMakeRoom?.enabled) {
+    const residualUnitsByCargoId = new Map<string, UnitItem[]>();
+    for (const u of allUnits) {
+      const list = residualUnitsByCargoId.get(u.cargoId) ?? [];
+      list.push(u);
+      residualUnitsByCargoId.set(u.cargoId, list);
+    }
+    const repairedUnplaced = residualMakeRoomRepack(
+      containers,
+      unplaced,
+      residualUnitsByCargoId,
+      options.residualMakeRoom,
+      candidatesFor,
+      recordBookingAnchor,
+    );
+    unplaced.length = 0;
+    for (const u of repairedUnplaced) unplaced.push(u);
+  }
+
   // 6) CT 화물 CBM → 컨테이너별 남은 여유 CBM 에 합산 (cargo 단위 분할 추적)
   //    옵션상 exclusive 컨에 CT 차단이면 해당 컨테이너 건너뜀
   if (ctCargoes.length > 0 && ctCbm > 0) {
@@ -2572,6 +3336,22 @@ export interface PackBestOptions extends PackOptions {
    * 기본 false — 회귀 0 보장 매트릭스 유지.
    */
   lightMode?: boolean;
+  /**
+   * **진단/실험 전용 candidateUnion experimental options.**
+   *
+   * `packBestWithCandidateUnion` 에만 영향. production 기본값 변경 X.
+   *
+   * - `singleStrategy`: 지정 시 candidateUnion 내부 packBest 호출을 우회해서 pack() 단일 전략으로
+   *   각 candidate set 시도. multi-strategy matrix 폭증 회피용. 운영 packBest 의 8 전략 매트릭스를
+   *   대형 샘플 (4ST SG / 5ST SG) 에서 stall 시키지 않음.
+   * - `timeBudgetMs`: 전체 candidateUnion 함수 실행 budget. 초과 시 best so far 반환.
+   *
+   * 사용 시: `useCandidateUnion=true` opt-in 호출에서만 의미. production packBest 직접 호출엔 영향 X.
+   */
+  candidateUnionExperimental?: {
+    singleStrategy?: PackOptions["sortStrategy"];
+    timeBudgetMs?: number;
+  };
 }
 
 export function packBest(
@@ -3032,8 +3812,38 @@ export function packBestWithCandidateUnion(
     return packBest(cargoes, mode, options);
   }
 
+  // [실험 opt-in] singleStrategy + timeBudgetMs — multi-strategy matrix 우회 + 시간 가드.
+  // production 기본값 영향 0 (experimental 옵션 미지정 시 기존 경로 그대로).
+  const exp = options?.candidateUnionExperimental;
+  const singleStrategy = exp?.singleStrategy;
+  const timeBudgetMs = exp?.timeBudgetMs;
+  const startedAt = Date.now();
+  const timedOut = (): boolean =>
+    typeof timeBudgetMs === "number" && Date.now() - startedAt > timeBudgetMs;
+
+  // 단일 전략 호출 헬퍼 — pack() 직접 호출 (multi-strategy matrix 우회)
+  const callOnce = (
+    candidateSet: ContainerType[] | undefined,
+  ): CLPResult => {
+    if (singleStrategy) {
+      const optsForPack: PackOptions = {
+        ...options,
+        sortStrategy: singleStrategy,
+        attachDebug: true,
+      };
+      if (candidateSet) optsForPack.fixedContainers = candidateSet;
+      return pack(cargoes, mode, optsForPack);
+    }
+    // 기본 경로 — packBest 의 multi-strategy matrix 사용
+    return packBest(cargoes, mode, {
+      ...options,
+      ...(candidateSet ? { fixedContainers: candidateSet } : {}),
+      attachDebug: true,
+    });
+  };
+
   // 2) 첫 시도 — 현재 알고리즘 (legacy 기준) + debug
-  const initial = packBest(cargoes, mode, { ...options, attachDebug: true });
+  const initial = callOnce(undefined);
   const debug = initial.debug;
   if (!debug) return initial; // 안전망
 
@@ -3069,15 +3879,9 @@ export function packBestWithCandidateUnion(
   const results: Array<{ result: CLPResult; cand: ContainerType[] }> = [];
   const initialKey = candKey(initialCand);
   for (const cand of candidates) {
+    if (timedOut()) break;
     const key = candKey(cand);
-    const result: CLPResult =
-      key === initialKey
-        ? initial
-        : packBest(cargoes, mode, {
-            ...options,
-            fixedContainers: cand,
-            attachDebug: true,
-          });
+    const result: CLPResult = key === initialKey ? initial : callOnce(cand);
     results.push({ result, cand });
     if (isValid6(result)) return result;
   }
@@ -3096,8 +3900,11 @@ function isValid6(r: CLPResult): boolean {
   if (unplaced > 0) return false;
   const audit = strictStackAudit(r);
   if (!audit.pass || audit.violations.length > 0) return false;
+  // CBM 검사: softCap (maxCbm × CONTAINER_SOFT_OVERFLOW_RATIO) 이내는 valid-with-warning,
+  // softCap 초과는 hard invalid. allocateBulkGroup 의 운영 정책과 일관 (W1, 2026-05-13).
   for (const c of r.containers) {
-    if (c.totalCbm + c.ctCbm > c.spec.maxCbm + 0.001) return false;
+    const softCap = c.spec.maxCbm * CONTAINER_SOFT_OVERFLOW_RATIO;
+    if (c.totalCbm + c.ctCbm > softCap + 0.001) return false;
     if (c.totalWeight > c.spec.maxWeightKg + 0.001) return false;
   }
   const { cargoSplit, bookingSplit } = countSplits(r);
@@ -3161,11 +3968,14 @@ function compareLex(a: CLPResult, b: CLPResult): number {
     const audit = strictStackAudit(r);
     const auditFail = audit.pass ? 0 : 1;
     const hardViolations = audit.violations.length;
-    let cbmOverflow = 0;
+    // CBM overflow 카운트: softCap 초과만 hardCbmOverflow 로 본다 (W1, 2026-05-13).
+    // soft 초과 (maxCbm 초과 ~ softCap 이내) 는 운영 warning 으로 lex 비교에서 제외.
+    let hardCbmOverflow = 0;
     let weightOverflow = 0;
     let totalCap = 0;
     for (const c of r.containers) {
-      if (c.totalCbm + c.ctCbm > c.spec.maxCbm + 0.001) cbmOverflow++;
+      const softCap = c.spec.maxCbm * CONTAINER_SOFT_OVERFLOW_RATIO;
+      if (c.totalCbm + c.ctCbm > softCap + 0.001) hardCbmOverflow++;
       if (c.totalWeight > c.spec.maxWeightKg + 0.001) weightOverflow++;
       totalCap += c.spec.maxCbm;
     }
@@ -3174,7 +3984,7 @@ function compareLex(a: CLPResult, b: CLPResult): number {
       unplaced,
       auditFail,
       hardViolations,
-      cbmOverflow,
+      hardCbmOverflow,
       weightOverflow,
       cargoSplit,
       bookingSplit,

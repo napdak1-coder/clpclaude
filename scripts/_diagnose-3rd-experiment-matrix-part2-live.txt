@@ -1,0 +1,5 @@
+=== Part 2 — 4ST SG / 5ST SG E0/E1/E2 ===
+date: 2026-05-13T08:32:44.036Z
+
+| sample | exp | 컨 셋 | mode | unpl | cargoSpl | bookSpl | audit | softCbm | hardCbm | pack(s) |
+|---|---|---|---|---:|---:|---:|---|---:|---:|---:|
