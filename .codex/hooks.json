@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node 'C:\\Users\\napda\\OneDrive\\바탕 화면\\clpclaude - 코덱스용\\.codex\\hooks\\algo-pipeline-reminder.mjs'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const fs=require('fs');try{const c=fs.readFileSync('./WORK-PLAN.md','utf8');process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:'### clpclaude WORK-PLAN.md (자동 로드)\\n\\n'+c}}))}catch(e){process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:''}}))}\""
+          }
+        ]
+      }
+    ]
+  }
+}
